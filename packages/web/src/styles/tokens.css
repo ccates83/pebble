@@ -142,8 +142,8 @@
   /* -- type -------------------------------------------------------------- */
   /* A pixel face for headings and signs, a tiny pixel face for nameplates on
      the map, a clean sans for anything dense, and mono for identifiers. */
-  --font-display: 'Pixelify Sans', Silkscreen, 'Courier New', monospace;
-  --font-pixel: Silkscreen, 'Pixelify Sans', 'Courier New', monospace;
+  --font-display: 'Pixelify Sans', VT323, 'Courier New', monospace;
+  --font-pixel: VT323, 'Pixelify Sans', 'Courier New', monospace;
   --font-body: Nunito, 'Avenir Next', 'Segoe UI', 'Trebuchet MS', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
 
@@ -154,7 +154,7 @@
   --fs-h3: 1.0625rem;
   --fs-h2: clamp(1.2rem, 1.05rem + 0.6vw, 1.45rem);
   --fs-h1: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
-  --fs-pixel: 8px;        /* Silkscreen is drawn on an 8px grid: 8 or 16, never between */
+  --fs-pixel: 17px;       /* VT323 is condensed and only reads well from ~16px; it is the small-label face */
 
   /* -- space ------------------------------------------------------------- */
   --sp-1: 0.25rem;

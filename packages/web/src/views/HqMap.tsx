@@ -45,7 +45,7 @@ import { isPending, kindSummary, markerWords, plural, type Pins, type Selection,
 const WALL = 6;
 const BACK = 44;
 const CORRIDOR = 22;
-const CELL_W = 44;
+const CELL_W = 50;
 const ROW_H = 66;
 const RIGHT = 16;
 const FRONT = 26;

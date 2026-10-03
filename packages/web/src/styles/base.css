@@ -5,6 +5,8 @@
 }
 
 html {
+  /* VT323 ships one weight; a synthesized bold smears its pixels. */
+  font-synthesis-weight: none;
   color-scheme: light dark;
 }
 

@@ -264,7 +264,8 @@
 
 /* "Charter unfilled", hung on the hazard tape across the back wall. */
 .room__tape {
-  translate: -50% -50%;
+  /* Hang below the tape line, so the bigger label never covers the sign. */
+  translate: -50% 10%;
   display: flex;
   align-items: center;
   gap: 3px;
@@ -276,9 +277,7 @@
   color: var(--c-ink);
   font-family: var(--font-pixel);
   font-size: var(--fs-pixel);
-  font-weight: 700;
-  text-transform: uppercase;
-  padding: 1px 4px;
+  padding: 0 4px;
   box-shadow: 0 0 0 1px var(--px-ink);
 }
 
@@ -308,7 +307,7 @@
   background: var(--c-paper);
   color: var(--c-ink);
   box-shadow: 0 0 0 1px var(--px-ink);
-  font: 700 var(--fs-pixel) / 12px var(--font-pixel);
+  font: 400 var(--fs-pixel) / 1 var(--font-pixel);
   text-align: center;
 }
 
@@ -372,8 +371,7 @@ button.station[aria-pressed='true']::before {
   box-shadow: 0 0 0 1px var(--px-ink), 2px 2px 0 0 var(--px-shade);
   font-family: var(--font-pixel);
   font-size: var(--fs-pixel);
-  line-height: 1;
-  text-transform: uppercase;
+  line-height: 0.95;
 }
 
 .station__plate,
@@ -384,7 +382,7 @@ button.station[aria-pressed='true']::before {
 }
 
 .station__plate {
-  font-weight: 700;
+  color: var(--c-ink);
 }
 
 .station__status {
@@ -718,7 +716,7 @@ button.station[aria-pressed='true']::before {
   padding: 0 2px;
   background: var(--px-ink);
   color: var(--c-paper);
-  font: 700 var(--fs-pixel) / 12px var(--font-pixel);
+  font: 400 var(--fs-pixel) / 1 var(--font-pixel);
   text-align: center;
 }
 

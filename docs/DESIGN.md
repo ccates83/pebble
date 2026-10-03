@@ -74,13 +74,16 @@ identical (they were generated from one list; edit both together).
 | Token | Face | Used for |
 |---|---|---|
 | `--font-display` | Pixelify Sans | Wordmark, headings, room signs, rail items |
-| `--font-pixel` | Silkscreen, at `--fs-pixel` (8px) only | Nameplates and captions on the map, kickers, small uppercase labels |
+| `--font-pixel` | VT323, at `--fs-pixel` (17px) | Nameplates and captions on the map, kickers, small labels |
 | `--font-body` | Nunito | Everything dense: body text, tables, the inspector, slips |
 | `--font-mono` | JetBrains Mono | Identifiers, paths, commands, model ids, agent ids |
 
 **Readability wins.** The pixel faces are for signs and labels. Dense reading
-stays in Nunito, which holds up at 13px in a table. Silkscreen is drawn on an
-8px grid, so use it at 8px (or 16px), never in between, or it blurs.
+stays in Nunito, which holds up at 13px in a table. Map labels use VT323: it is
+condensed, so a department name fits on a desk at a size a small laptop can
+read. It replaced 8px Silkscreen, which Connor found unreadable on a laptop
+screen (2026-10-02). VT323 has one weight, so synthesized bold is turned off
+globally; mark emphasis with colour or case, never `font-weight`.
 
 ◆ Numbers are tabular wherever they sit in a column. The body sets
 `font-variant-numeric: tabular-nums` globally, because Nunito's default figures

@@ -115,8 +115,8 @@ door, sit down while their run is live, and walk out when it ends.
   (`components/sprites.tsx`) rendered as SVG rects with `crispEdges` and a
   `px-*` palette class per cell. No image assets, no sprite library, no smooth
   vector shapes. Don't drift back to rounded or illustrated art.
-- **Fonts:** Pixelify Sans for headings and signs, Silkscreen (8px only) for
-  map nameplates and small labels, Nunito for anything dense, JetBrains Mono
+- **Fonts:** Pixelify Sans for headings and signs, VT323 (~17px) for map
+  nameplates and small labels — never shrink these below what a laptop can read, Nunito for anything dense, JetBrains Mono
   for identifiers.
 - **Motion is honest.** Characters arrive and leave only when the data changed
   (the client diffs reads); the first-load entrance is the one exception,

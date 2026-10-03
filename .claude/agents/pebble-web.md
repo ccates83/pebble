@@ -32,8 +32,8 @@ that rather than reaching into `packages/core`.
   actionable.
 - **No glassmorphism, gradient text, or modals.** Inspect inline. Nesting is
   allowed only where it *is* the information (floor → room → desk).
-- **Fonts**: Pixelify Sans for headings and signs, Silkscreen at 8px for map
-  nameplates and small labels, Nunito for dense text, JetBrains Mono for
+- **Fonts**: Pixelify Sans for headings and signs, VT323 at ~17px for map
+  nameplates and small labels (8px text was unreadable on a laptop), Nunito for dense text, JetBrains Mono for
   identifiers. Never a system default.
 - **Pixel art**: sprites are string grids in `components/sprites.tsx`, rendered
   as SVG rects with `crispEdges` and one `px-*` class per cell. Frames animate
