@@ -114,3 +114,31 @@ message queue and no ORM. If a query gets slow it gets an index.
 They import the built output, not `src`. That tests what ships, and it avoids
 needing a TypeScript loader for the test runner. The cost is remembering to build
 first, which `pnpm check` does.
+
+## The org reader is not an adapter
+
+Adapters normalize an *agent tool's* files into sessions and config. The org —
+`org.json` and the subsidiary vaults — is not an agent tool; it is the context
+those sessions run in, and it is the same whichever tool ran them. Making it an
+adapter would mean either faking sessions out of notes or growing the adapter
+contract a second, unrelated half. So it lives in `core/src/org/`, knows no
+vendor, and joins to sessions only through `projectPath` and the sub-agent
+`agentType` an adapter already reports.
+
+## The org is read fresh per request, not indexed
+
+`/api/hq` reads `org.json` and the vaults on every call. It is a few dozen small
+files, and the cost of a stale answer is high: a cached snapshot would keep
+showing an approval as pending after Connor decided it. Indexing it would also
+make Pebble's copy of the vaults something that could drift from them. Live
+updates come from a stat-only fingerprint on the existing loop, which is cheap
+enough to run every tick because it opens no note.
+
+## Sub-agent runs are stored; their cost is not folded in
+
+Department activity needs "which agent ran, when, on what" across every
+session, and re-parsing transcripts per request would be slow. So the index
+keeps a `subagents` table, replaced wholesale with its parent session's row like
+every other derived row. It carries no cost: sub-agent cost stays the separate,
+labelled figure on the parent, for the reason given above. A unit's `cost7d` is
+the sum of its sessions' *own* cost for the same reason.

@@ -74,7 +74,7 @@ export function percent(value: number | null, digits = 0): string {
 export function costExplanation(cost: Cost): string | null {
   if (cost.conflict) {
     return (
-      `Claude Code reports ${money(cost.conflict.reportedUsd)}; calculating from token usage gives ` +
+      `The tool reports ${money(cost.conflict.reportedUsd)}; calculating from token usage gives ` +
       `${money(cost.conflict.computedUsd)}. The reported figure is shown. Both are kept — usually the ` +
       `price table is missing one of this session's models.`
     );
@@ -85,7 +85,7 @@ export function costExplanation(cost: Cost): string | null {
   if (cost.basis === 'partial') {
     return `Incomplete: ${cost.unpricedModels.join(', ') || 'a model'} could not be priced, so its usage is missing from this total.`;
   }
-  if (cost.basis === 'reported') return 'Reported by Claude Code itself.';
+  if (cost.basis === 'reported') return 'Reported by the tool itself.';
   return null;
 }
 
@@ -93,4 +93,40 @@ export function shortPath(path: string, keep = 3): string {
   const parts = path.split('/').filter(Boolean);
   if (parts.length <= keep) return path;
   return `…/${parts.slice(-keep).join('/')}`;
+}
+
+/**
+ * Opens a note in Obsidian. A link the OS hands to another app — Pebble itself
+ * still writes nothing.
+ */
+export function obsidianHref(absolutePath: string): string {
+  return `obsidian://open?path=${encodeURIComponent(absolutePath)}`;
+}
+
+/** A path relative to `root` for display, or the path unchanged if it lies outside. */
+export function relativeTo(path: string, root: string): string {
+  const base = root.endsWith('/') ? root : `${root}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
+}
+
+/**
+ * "due in 3d", "due today", "overdue 2d" — relativeTime() only looks backwards,
+ * and a due date is usually in the future. Date-only strings are read as local
+ * calendar days, not UTC midnight, so "today" means the reader's today.
+ */
+export function dueLabel(due: string, now = Date.now()): { text: string; overdue: boolean } {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(due);
+  const then = dateOnly ? new Date(`${due}T00:00:00`).getTime() : Date.parse(due);
+  if (!Number.isFinite(then)) return { text: `due ${due}`, overdue: false };
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const days = Math.round((then - startOfToday.getTime()) / 86_400_000);
+  if (dateOnly && days === 0) return { text: 'due today', overdue: false };
+  if (then < now && !(dateOnly && days === 0)) {
+    const late = Math.max(1, -days);
+    return { text: `overdue ${late}d`, overdue: true };
+  }
+  if (days <= 0) return { text: 'due today', overdue: false };
+  if (days === 1) return { text: 'due tomorrow', overdue: false };
+  return { text: `due in ${days}d`, overdue: false };
 }

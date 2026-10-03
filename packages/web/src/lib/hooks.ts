@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { subscribe, type StreamEvent } from './api.ts';
+import { ApiError, subscribe, type StreamEvent } from './api.ts';
 
 export interface AsyncState<T> {
   data: T | null;
   error: string | null;
+  /** HTTP status of the failure, when the server answered at all. */
+  errorStatus: number | null;
   loading: boolean;
   /** True while refetching with data already on screen — no full-page spinner. */
   refreshing: boolean;
@@ -20,6 +22,7 @@ export interface AsyncState<T> {
 export function useAsync<T>(load: () => Promise<T>, deps: unknown[] = []): AsyncState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [nonce, setNonce] = useState(0);
@@ -37,10 +40,12 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[] = []): Async
         setData(value);
         hasData.current = true;
         setError(null);
+        setErrorStatus(null);
       })
       .catch((cause: unknown) => {
         if (generation.current !== current) return;
         setError(cause instanceof Error ? cause.message : String(cause));
+        setErrorStatus(cause instanceof ApiError ? cause.status : null);
       })
       .finally(() => {
         if (generation.current !== current) return;
@@ -51,26 +56,29 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[] = []): Async
   }, [...deps, nonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { data, error, loading, refreshing, reload };
+  return { data, error, errorStatus, loading, refreshing, reload };
 }
 
-/** Fires `onIndex` whenever the server reports that the index changed. */
-export function useLiveIndex(onIndex: () => void): StreamEvent | null {
+/**
+ * Fires `onChange` whenever the server reports that the session index or the
+ * org's vaults changed. Both mean "what is on screen may be stale".
+ */
+export function useLiveIndex(onChange: (event: StreamEvent) => void): StreamEvent | null {
   const [last, setLast] = useState<StreamEvent | null>(null);
-  const handler = useRef(onIndex);
-  handler.current = onIndex;
+  const handler = useRef(onChange);
+  handler.current = onChange;
 
   useEffect(() => {
     return subscribe((event) => {
       setLast(event);
-      if (event.type === 'index') handler.current();
+      if (event.type === 'index' || event.type === 'org') handler.current(event);
     });
   }, []);
 
   return last;
 }
 
-/** Hash routing. No router library for a six-view app. */
+/** Hash routing. No router library for a seven-view app. */
 export interface Route {
   view: string;
   params: Record<string, string>;
@@ -86,7 +94,7 @@ function readHash(): Route {
     params.adapter = segments[1];
     if (segments[2]) params.id = segments[2];
   }
-  return { view: segments[0] ?? 'fleet', params };
+  return { view: segments[0] ?? 'hq', params };
 }
 
 export function useRoute(): Route {

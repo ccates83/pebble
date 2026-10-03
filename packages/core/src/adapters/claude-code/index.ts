@@ -10,6 +10,7 @@ import type {
   SessionDetail,
   SessionSource,
   SessionSummary,
+  SubagentSummary,
 } from '../../types.ts';
 import { mapLimit } from '../../util.ts';
 import { claudeRoot, projectsDir } from './paths.ts';
@@ -86,15 +87,18 @@ async function findTranscripts(root = claudeRoot()): Promise<TranscriptFile[]> {
 async function withSubagents(
   summary: SessionSummary,
   file: { path: string; subagentCount?: number },
-): Promise<SessionSummary> {
-  if (file.subagentCount === 0) return summary;
+): Promise<{ summary: SessionSummary; subagents: SubagentSummary[] }> {
+  if (file.subagentCount === 0) return { summary, subagents: [] };
   const rollup = await rollupSubagents(file.path, summary.id);
-  if (rollup.count === 0) return summary;
+  if (rollup.count === 0) return { summary, subagents: [] };
   return {
-    ...summary,
-    subagentCount: rollup.count,
-    subagentTokens: rollup.tokens,
-    subagentCost: rollup.cost,
+    summary: {
+      ...summary,
+      subagentCount: rollup.count,
+      subagentTokens: rollup.tokens,
+      subagentCost: rollup.cost,
+    },
+    subagents: rollup.subagents,
   };
 }
 
@@ -151,7 +155,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const parsed = await mapLimit(limited, PARSE_CONCURRENCY, async (file) => {
       const result = await parseTranscript(file.path, { projectDirName: file.projectDirName });
       if (!result) return null;
-      return withSubagents(result.summary, file);
+      return (await withSubagents(result.summary, file)).summary;
     });
 
     return parsed
@@ -204,8 +208,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       projectDirName: source.hint?.projectDirName,
     });
     if (!parsed) return null;
+    const { summary, subagents } = await withSubagents(parsed.summary, { path: source.path });
     return {
-      summary: await withSubagents(parsed.summary, { path: source.path }),
+      summary,
+      subagents,
       promptPreview: parsed.firstPrompt,
       toolHistogram: parsed.toolHistogram,
       sourceMtimeMs: source.mtimeMs,
@@ -216,5 +222,5 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 export { ADAPTER_ID, parseTranscript } from './transcript.ts';
 export { claudeRoot, projectsDir, decodeProjectDirName, encodeProjectPath } from './paths.ts';
 export { scanClaudeConfig, findShadowed } from './config.ts';
-export { findSubagentFiles, rollupSubagents, subagentDir } from './subagents.ts';
+export { findSubagentFiles, rollupSubagents, subagentDir, readSubagentAgentType } from './subagents.ts';
 export type { ScanConfigOptions } from './config.ts';

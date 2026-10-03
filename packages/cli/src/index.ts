@@ -7,8 +7,13 @@ import {
   AdapterRegistry,
   Indexer,
   PebbleStore,
+  buildHqOverview,
+  loadOrg,
+  resolveOrgRoot,
   runDoctor,
+  type AttentionItem,
   type ConfigSurface,
+  type HqUnit,
   type SessionStatus,
 } from '@pebble/core';
 import { DEFAULT_PORT, startServer } from '@pebble/server';
@@ -18,7 +23,8 @@ import { bold, compactNumber, costLabel, cyan, dim, green, money, red, relativeT
 const HELP = `${bold('pebble')} — a local control center for your coding agents
 
 ${bold('Usage')}
-  pebble serve [--port N] [--host H] [--open] [--poll MS]
+  pebble serve [--port N] [--host H] [--open] [--poll MS] [--org DIR]
+  pebble hq [--org DIR] [--all] [--json]
   pebble sessions [--status s,s] [--project P] [--limit N] [--json]
   pebble show <session-id> [--events N] [--json]
   pebble config [--kind K] [--scope S] [--issues] [--json]
@@ -29,6 +35,7 @@ ${bold('Usage')}
 
 ${bold('Commands')}
   serve      Run the dashboard and API (default ${DEFAULT_PORT}). Re-indexes on a timer.
+  hq         What needs your attention across the org, and one line per subsidiary.
   sessions   List agent sessions, newest first.
   show       One session in detail: timeline, tools, sub-agents.
   config     Inventory every agent, skill, command, hook and MCP server on this machine.
@@ -40,7 +47,11 @@ ${bold('Commands')}
 ${bold('Notes')}
   Read-only. Pebble never writes to ~/.claude, never spawns an agent, and never
   makes a network request. Its own index lives in ~/.pebble and can be deleted
-  at any time.
+  at any time. It also reads the org root (org.json and its vaults) and never
+  writes there either.
+
+  The org root is --org, else PEBBLE_ORG_ROOT, else the nearest directory above
+  this one holding an org.json, else ~/Development.
 
   A ${yellow('~')} after a dollar figure means it was estimated from a model Pebble
   does not have an exact price for; ${yellow('*')} means the host tool and Pebble
@@ -91,6 +102,7 @@ async function cmdServe(args: string[]): Promise<void> {
       host: { type: 'string' },
       poll: { type: 'string' },
       db: { type: 'string' },
+      org: { type: 'string' },
       open: { type: 'boolean', default: false },
     },
     allowPositionals: false,
@@ -103,6 +115,7 @@ async function cmdServe(args: string[]): Promise<void> {
     pollMs: values.poll ? Number(values.poll) : undefined,
     dbPath: values.db,
     webRoot: root,
+    orgRoot: values.org,
     onListen: ({ url }) => {
       process.stdout.write(`${bold('pebble')} ${dim('·')} ${cyan(url)}\n`);
       process.stdout.write(
@@ -127,6 +140,112 @@ async function cmdServe(args: string[]): Promise<void> {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+}
+
+const ATTENTION_LABEL: Record<AttentionItem['kind'], string> = {
+  approval: 'approval',
+  'waiting-session': 'waiting',
+  'session-errors': 'errors',
+  drift: 'drift',
+  inbox: 'inbox',
+  proposal: 'proposal',
+  charter: 'charter',
+  'review-overdue': 'review',
+  'org-issue': 'org',
+};
+
+function unitLine(unit: HqUnit): string {
+  const live = unit.live.length;
+  return (
+    `${unit.sessions7d} session${unit.sessions7d === 1 ? '' : 's'} 7d` +
+    ` ${dim('·')} ${costLabel(unit.cost7d.usd, unit.cost7d.approximate ? 'estimated' : 'exact', false)} ${dim('own cost 7d')}` +
+    (live > 0 ? ` ${dim('·')} ${green(`${live} live`)}` : '') +
+    (unit.lastActivityAt ? ` ${dim('·')} last ${relativeTime(unit.lastActivityAt)}` : '')
+  );
+}
+
+async function cmdHq(args: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    options: {
+      org: { type: 'string' },
+      all: { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+      db: { type: 'string' },
+    },
+  });
+
+  const store = openStore(values.db);
+  await freshIndex(store);
+  const load = await loadOrg(resolveOrgRoot({ flag: values.org }));
+  const overview = buildHqOverview(store, load.org, Date.now(), load);
+  store.close();
+
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify(overview, null, 2)}\n`);
+    return;
+  }
+
+  process.stdout.write(`${bold('pebble hq')} ${dim('·')} ${overview.orgRoot} ${dim(`(${overview.orgRootSource})`)}\n`);
+  const org = overview.org;
+  if (!org) {
+    process.stdout.write(`\n${yellow(overview.orgError ?? 'No org found.')}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const archived = new Set(
+    org.subsidiaries.filter((s) => s.status.toLowerCase() === 'archived' || s.archived !== null).map((s) => s.id),
+  );
+  const unitName = new Map(overview.units.map((u) => [u.id, u.name]));
+
+  // Archived subsidiaries only ever raise approvals; those stay visible unless
+  // they belong to a hidden subsidiary.
+  const attention = overview.attention.filter((a) => values.all || a.unit === null || !archived.has(a.unit));
+  process.stdout.write(`\n${bold('Needs attention')} ${dim(`(${attention.length})`)}\n`);
+  if (attention.length === 0) process.stdout.write(dim('  nothing\n'));
+  const SHOWN = 40;
+  for (const item of attention.slice(0, SHOWN)) {
+    const paint = item.level === 'error' ? red : item.level === 'warn' ? yellow : dim;
+    const where = item.unit ? unitName.get(item.unit) ?? item.unit : 'org';
+    process.stdout.write(
+      `  ${paint(item.level.padEnd(5))} ${ATTENTION_LABEL[item.kind].padEnd(8)} ${cyan(where.slice(0, 18).padEnd(18))} ` +
+        `${item.title.slice(0, 70)}${item.detail ? dim(` — ${item.detail.slice(0, 80)}`) : ''}\n`,
+    );
+  }
+  if (attention.length > SHOWN) process.stdout.write(dim(`  …and ${attention.length - SHOWN} more (--json for all)\n`));
+
+  process.stdout.write(`\n${bold('Subsidiaries')}\n`);
+  const hidden = org.subsidiaries.filter((s) => archived.has(s.id) && !values.all).length;
+  for (const sub of org.subsidiaries) {
+    if (archived.has(sub.id) && !values.all) continue;
+    const unit = overview.units.find((u) => u.kind === 'subsidiary' && u.id === sub.id);
+    const pending = sub.approvals.filter((a) => (a.status ?? '').toLowerCase() === 'pending').length;
+    process.stdout.write(
+      `  ${bold(sub.name)} ${dim(`[${sub.id}]`)} — ${sub.status} ${dim('·')} ${sub.departments.length} depts` +
+        ` ${dim('·')} ${pending > 0 ? yellow(`${pending} pending approval${pending === 1 ? '' : 's'}`) : '0 pending approvals'}` +
+        ` ${dim('·')} last review: ${sub.lastReview ? sub.lastReview.title : 'none'}\n`,
+    );
+    if (unit) process.stdout.write(`      ${unitLine(unit)}\n`);
+    if (sub.drift.length > 0) process.stdout.write(`      ${yellow(`! ${sub.drift.map((d) => d.message).join('; ')}`)}\n`);
+    if (unit) {
+      const busy = unit.departments.filter((d) => d.lastActivityAt !== null);
+      for (const d of busy) {
+        process.stdout.write(
+          `      ${dim('·')} ${d.department} ${statusMark(d.status ?? 'done')} ${dim(`${d.runs7d} run${d.runs7d === 1 ? '' : 's'} 7d`)}` +
+            ` ${(d.lastTitle ?? '').slice(0, 60)}\n`,
+        );
+      }
+    }
+  }
+  if (hidden > 0) process.stdout.write(dim(`  ${hidden} archived hidden (--all to show)\n`));
+
+  const hq = overview.units.find((u) => u.kind === 'hq');
+  process.stdout.write(`\n${bold('HQ')}  ${hq ? unitLine(hq) : dim('—')}\n`);
+  for (const tool of overview.units.filter((u) => u.kind === 'tooling')) {
+    process.stdout.write(`${bold(tool.name)}  ${unitLine(tool)} ${dim('(tooling)')}\n`);
+  }
+  process.stdout.write(dim(`\n${overview.outside7d} session${overview.outside7d === 1 ? '' : 's'} outside the org in the last 7 days.\n`));
 }
 
 async function cmdSessions(args: string[]): Promise<void> {
@@ -494,6 +613,8 @@ async function cmdWhere(): Promise<void> {
     );
     for (const root of adapter.watchRoots()) process.stdout.write(`  ${''.padEnd(14)} ${dim(root)}\n`);
   }
+  const org = resolveOrgRoot();
+  process.stdout.write(`  ${'org'.padEnd(14)} ${dim(`${org.root} (${org.source})`)}\n`);
   process.stdout.write(`\n${bold('writes')}\n  ${dim(store.path)} ${dim('(derived index — safe to delete)')}\n`);
   const web = webRoot();
   process.stdout.write(`\n${bold('dashboard assets')}\n  ${web ? dim(web) : yellow('not built — run `pnpm build`')}\n`);
@@ -505,6 +626,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   switch (command) {
     case 'serve':
       return cmdServe(rest);
+    case 'hq':
+      return cmdHq(rest);
     case 'sessions':
     case 'ls':
       return cmdSessions(rest);

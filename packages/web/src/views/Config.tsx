@@ -70,7 +70,7 @@ export function Config(props: { reloadToken: number }): ReactNode {
     return items;
   }, [surface, kinds, scopes, onlyIssues, search]);
 
-  if (state.loading && !state.data) return <Empty>Scanning every project Claude Code knows about…</Empty>;
+  if (state.loading && !state.data) return <Empty>Scanning every project the watched tools know about…</Empty>;
   if (state.error && !state.data) return <Note tone="error">{state.error}</Note>;
   if (!surface) return null;
 

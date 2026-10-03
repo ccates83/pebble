@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PebbleStore, ZERO_TOKENS } from '../dist/index.js';
+import { PebbleStore, SCHEMA_VERSION, ZERO_TOKENS } from '../dist/index.js';
 
 const session = (overrides = {}) => ({
   id: 'sess-1',
@@ -245,4 +245,72 @@ test('the schema version is recorded so a future migration can detect it', () =>
   const store = new PebbleStore(':memory:');
   assert.ok(Number(store.getMeta('schema_version')) >= 1);
   store.close();
+});
+
+const subagent = (overrides = {}) => ({
+  id: 'agent-1',
+  parentSessionId: 'sess-1',
+  agentType: 'sales',
+  title: 'Draft the pipeline report',
+  models: ['claude-opus-5'],
+  startedAt: '2026-10-01T10:10:00.000Z',
+  lastActivityAt: '2026-10-01T10:20:00.000Z',
+  status: 'done',
+  pendingToolCalls: 0,
+  toolCalls: 4,
+  tokens: ZERO_TOKENS,
+  cost: { usd: 0.2, basis: 'exact', unpricedModels: [] },
+  errorCount: 0,
+  transcriptPath: '/x/agent-1.jsonl',
+  transcriptBytes: 10,
+  ...overrides,
+});
+
+test('sub-agent runs are replaced with their parent, never merged', () => {
+  const store = new PebbleStore(':memory:');
+  store.upsertSession(session(), { ...extras(), subagents: [subagent(), subagent({ id: 'agent-2', agentType: null })] });
+  assert.equal(store.listSubagentRunsUnder('/Users/me/work').length, 2);
+
+  // A re-read that finds one sub-agent leaves exactly one, not three.
+  store.upsertSession(session(), { ...extras(2_000), subagents: [subagent({ id: 'agent-3', agentType: 'finance' })] });
+  const runs = store.listSubagentRunsUnder('/Users/me/work');
+  assert.deepEqual(runs.map((r) => r.id), ['agent-3']);
+  assert.equal(runs[0].agentType, 'finance');
+  assert.equal(runs[0].parentProjectPath, '/Users/me/work/alpha');
+
+  store.pruneMissing('claude-code', new Set());
+  assert.equal(store.listSubagentRunsUnder('/Users/me/work').length, 0, 'pruning a session drops its runs');
+  store.close();
+});
+
+test('prefix queries match on segment boundaries and treat _ literally', () => {
+  const store = new PebbleStore(':memory:');
+  store.upsertSession(session({ id: 'a', projectPath: '/x/_archive/fiverr' }), extras());
+  store.upsertSession(session({ id: 'b', projectPath: '/x/Xarchive/fiverr' }), extras());
+  store.upsertSession(session({ id: 'c', projectPath: '/x/_archive' }), extras());
+  store.upsertSession(session({ id: 'd', projectPath: '/x/_archive-old' }), extras());
+  assert.deepEqual(store.listSessionsUnder('/x/_archive').map((s) => s.id).sort(), ['a', 'c']);
+  store.close();
+});
+
+test('an index from an older schema is dropped and rebuilt, not half-migrated', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { DatabaseSync } = await import('node:sqlite');
+  const path = join(await mkdtemp(join(tmpdir(), 'pebble-store-')), 'old.db');
+
+  const first = new PebbleStore(path);
+  first.upsertSession(session(), extras());
+  first.close();
+
+  const raw = new DatabaseSync(path);
+  raw.exec("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+  raw.close();
+
+  const reopened = new PebbleStore(path);
+  assert.equal(reopened.listSessions().length, 0, 'rows from the old schema are gone; the next index pass refills them');
+  assert.equal(reopened.getMeta('schema_version'), String(SCHEMA_VERSION));
+  assert.equal(reopened.isFresh('claude-code', 'sess-1', 4_096, 1_000), false);
+  reopened.close();
 });

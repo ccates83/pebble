@@ -4,6 +4,8 @@
  */
 export type PebbleEvent =
   | { type: 'index'; updated: number; durationMs: number; at: string }
+  /** Something the HQ view reads under the org root changed on disk. Re-fetch `/api/hq`. */
+  | { type: 'org'; at: string }
   | { type: 'hello'; at: string }
   | { type: 'ping'; at: string };
 

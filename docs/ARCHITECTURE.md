@@ -3,9 +3,14 @@
 ```
 ~/.claude/projects/**/*.jsonl ──┐
 ~/.claude/{settings,agents,…} ──┼─→ adapter ─→ core types ─→ SQLite index ─→ API ─→ dashboard
-<project>/.claude/** ───────────┘      │                         ↑            │
-                                       └── config surface ───────┘         SSE push
+<project>/.claude/** ───────────┘      │                         ↑     ↑      │
+                                       └── config surface ───────┘     │   SSE push
+<org root>/org.json + vaults ─────────→ org reader (per request) ──────┘ (/api/hq)
 ```
+
+Everything on the left is read, never written. That covers the org root as
+much as `~/.claude`: Pebble opens `org.json` and the vaults beneath it to look,
+and has no code path that writes there.
 
 Four packages, one direction of dependency: `web → server → core`, with `cli`
 depending on `core` and `server`. Nothing depends on `web`.
@@ -39,6 +44,34 @@ If sub-second events are wanted later, a hook becomes an *additional* source tha
 nudges the loop, not a replacement for it. Pebble must keep working with no hooks
 installed.
 
+## The org
+
+Pebble sits inside a holding company: an org root with `org.json`, an `HQ/`
+vault, one vault per subsidiary, and tooling repos. `packages/core/src/org/`
+reads it.
+
+- **Finding it.** `--org`, then `PEBBLE_ORG_ROOT`, then the nearest ancestor of
+  the working directory holding an `org.json`, then `~/Development`. An explicit
+  choice is honoured even if it holds no `org.json`; the view then says so
+  rather than quietly showing a different org.
+- **Reading it.** `readOrg` walks `org.json` and the vault conventions —
+  approvals, inbox, self-improvement proposals, changelog, weekly reviews,
+  charters, department scorecards, agent definitions, `_HQ/SYNCED.md` — and
+  returns an `OrgSnapshot`. It never throws; a malformed `org.json` or a missing
+  vault is an `Issue` on the snapshot. The drift checks mirror `org status` in
+  HQ's `org` script so the terminal and the dashboard agree.
+- **Joining it to sessions.** `placeSession` maps a session's working directory
+  to HQ, a subsidiary, a tooling repo, or outside — longest prefix on whole path
+  segments. A department is attributed only on evidence: the session ran as that
+  department's agent, or spawned a sub-agent of that type (from the `subagents`
+  table, so no transcript is re-parsed per request).
+- **Serving it.** `buildHqOverview` produces `GET /api/hq` from a fresh snapshot
+  and the index. Attention items are derived on every call and never stored.
+- **Keeping it live.** The org is not indexed, so on every loop tick the server
+  takes a stat-only fingerprint (org.json, each vault's approvals, inbox,
+  proposals and reviews folders and the files in them, changelog and charter)
+  and publishes `{type: 'org'}` on the event bus when it moves.
+
 ## Where the layers stop
 
 **core** knows about files, formats and arithmetic. No HTTP, no React, no
@@ -59,8 +92,10 @@ disappear.
 ## The index
 
 SQLite via Node's built-in `node:sqlite`, in WAL mode so the dashboard can read
-while the indexer writes. Three tables: `sessions`, `session_models`,
-`tool_usage`, plus a `meta` key-value table carrying the schema version.
+while the indexer writes. Four tables: `sessions`, `session_models`,
+`tool_usage` and `subagents` (one row per sub-agent run: who ran, its title,
+status and times — not its cost), plus a `meta` key-value table carrying the
+schema version.
 
 It is a **cache**. The rules that follow from that:
 
@@ -73,7 +108,9 @@ It is a **cache**. The rules that follow from that:
 - Deleting `~/.pebble` is a supported operation.
 
 Schema changes bump `SCHEMA_VERSION`. Because everything is derivable, the
-migration strategy for a breaking change is to rebuild rather than to migrate.
+migration strategy for a breaking change is to rebuild rather than to migrate:
+opening a store whose recorded version differs drops every derived table, and
+the next index pass refills them from the transcripts.
 
 ## Status derivation
 

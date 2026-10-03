@@ -10,6 +10,7 @@ import { SessionDetail } from './views/SessionDetail.tsx';
 import { Config } from './views/Config.tsx';
 import { Analytics } from './views/Analytics.tsx';
 import { Doctor } from './views/Doctor.tsx';
+import { Hq, orgWorking, urgentCount } from './views/Hq.tsx';
 
 interface NavItem {
   view: string;
@@ -17,13 +18,16 @@ interface NavItem {
   label: string;
 }
 
-const NAV: NavItem[] = [
+/** Session usage across every project, in or out of the org. Secondary to HQ. */
+const USAGE_NAV: NavItem[] = [
   { view: 'fleet', href: '#/fleet', label: 'Fleet' },
   { view: 'sessions', href: '#/sessions', label: 'Sessions' },
-  { view: 'config', href: '#/config', label: 'Config' },
   { view: 'analytics', href: '#/analytics', label: 'Analytics' },
+  { view: 'config', href: '#/config', label: 'Config' },
   { view: 'doctor', href: '#/doctor', label: 'Doctor' },
 ];
+
+const KNOWN_VIEWS = new Set(['hq', 'session', ...USAGE_NAV.map((item) => item.view)]);
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -46,9 +50,9 @@ export function App(): ReactNode {
   // One live subscription for the whole app: a server index pass bumps a token
   // that every view depends on, so there is no per-view polling.
   const stream = useLiveIndex(
-    useCallback(() => {
+    useCallback((event: { type: string }) => {
       setReloadToken((token) => token + 1);
-      setLastIndexAt(new Date().toISOString());
+      if (event.type === 'index') setLastIndexAt(new Date().toISOString());
     }, []),
   );
 
@@ -63,14 +67,25 @@ export function App(): ReactNode {
   }, [theme]);
 
   const counts = useAsync(() => api.overview(), [reloadToken]);
+  const hq = useAsync(() => api.hq(), [reloadToken]);
   const live = counts.data?.live ?? [];
-  const needsYou = live.filter((session) => session.status === 'waiting' || session.errorCount > 0).length;
   const working = live.filter((session) => session.status === 'active').length;
+  const orgActive = orgWorking(hq.data);
+  // The badge counts what the HQ "Needs you" list counts. If the server cannot
+  // answer /api/hq at all, fall back to sessions waiting or errored, so a
+  // blocked agent is never silently dropped from the rail.
+  const hqAvailable = hq.data !== null;
+  const needsYou = hqAvailable
+    ? urgentCount(hq.data)
+    : live.filter((session) => session.status === 'waiting' || session.errorCount > 0).length;
+  const needsYouHref = hqAvailable ? '#/hq' : '#/sessions';
+  const brandLine = hq.data?.org?.name ?? 'holding company';
+  const view = KNOWN_VIEWS.has(route.view) ? route.view : 'hq';
 
-  const navCount = (view: string): string | undefined => {
-    if (view === 'fleet' && working > 0) return `${working} live`;
-    if (view === 'sessions' && counts.data) return String(counts.data.stats.sessions);
-    if (view === 'config' && counts.data) return undefined;
+  const navCount = (item: string): string | undefined => {
+    if (item === 'hq' && orgActive > 0) return `${orgActive} live`;
+    if (item === 'fleet' && working > 0) return `${working} live`;
+    if (item === 'sessions' && counts.data) return String(counts.data.stats.sessions);
     return undefined;
   };
 
@@ -81,64 +96,75 @@ export function App(): ReactNode {
       <nav className="rail">
         <div className="brand">
           <span className="brand__mark">Pebble</span>
-          <span className="faint micro">control center</span>
+          <span className="faint micro" title={brandLine}>
+            {brandLine}
+          </span>
         </div>
 
         <div className="nav">
-          {NAV.map((item) => (
-            <a
-              key={item.view}
-              className="nav__link"
-              href={item.href}
-              aria-current={route.view === item.view || (item.view === 'sessions' && route.view === 'session') ? 'page' : undefined}
-            >
-              <span>{item.label}</span>
-              <span className="nav__count">{navCount(item.view)}</span>
-            </a>
-          ))}
-        </div>
-
-        {needsYou > 0 && (
-          <div className="rail__foot">
-            <a className="badge badge--warn" href="#/sessions">
+          <a className="nav__link nav__link--primary" href="#/hq" aria-current={view === 'hq' ? 'page' : undefined}>
+            <span>HQ</span>
+            <span className="nav__count">{navCount('hq')}</span>
+          </a>
+          {needsYou > 0 && (
+            <a className="badge badge--warn rail__alert" href={needsYouHref}>
               {needsYou} need{needsYou === 1 ? 's' : ''} you
             </a>
-          </div>
-        )}
-
-        <div className="rail__foot">
-          <span className={`badge ${connected ? 'badge--live' : ''}`} title={connected ? 'Receiving live updates' : 'Not connected to the event stream'}>
-            {connected ? 'live' : 'offline'}
-          </span>
-          {lastIndexAt && <span className="faint micro">indexed {relativeTime(lastIndexAt)}</span>}
-          {counts.data && (
-            <span className="faint micro">
-              <Money usd={counts.data.stats.costUsd} approximate={counts.data.stats.approximateSessions > 0} /> all time
-            </span>
           )}
-          <div className="pills">
-            {(['system', 'light', 'dark'] as Theme[]).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className="pill"
-                aria-pressed={theme === option}
-                onClick={() => setTheme(option)}
+        </div>
+
+        <div className="rail__group" role="group" aria-labelledby="rail-usage">
+          <span id="rail-usage" className="rail__label micro">
+            Usage
+          </span>
+          <div className="nav">
+            {USAGE_NAV.map((item) => (
+              <a
+                key={item.view}
+                className="nav__link"
+                href={item.href}
+                aria-current={view === item.view || (item.view === 'sessions' && view === 'session') ? 'page' : undefined}
               >
-                {option}
-              </button>
+                <span>{item.label}</span>
+                <span className="nav__count">{navCount(item.view)}</span>
+              </a>
             ))}
           </div>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              void api.reindex(true).then(() => setReloadToken((token) => token + 1));
-            }}
-            title="Re-read every transcript, ignoring the freshness check"
-          >
-            rebuild index
-          </button>
+
+          <div className="rail__foot">
+            <span className={`badge ${connected ? 'badge--live' : ''}`} title={connected ? 'Receiving live updates' : 'Not connected to the event stream'}>
+              {connected ? 'live' : 'offline'}
+            </span>
+            {lastIndexAt && <span className="faint micro">indexed {relativeTime(lastIndexAt)}</span>}
+            {counts.data && (
+              <span className="faint micro">
+                <Money usd={counts.data.stats.costUsd} approximate={counts.data.stats.approximateSessions > 0} /> all time
+              </span>
+            )}
+            <div className="pills" role="group" aria-label="theme">
+              {(['system', 'light', 'dark'] as Theme[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className="pill"
+                  aria-pressed={theme === option}
+                  onClick={() => setTheme(option)}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                void api.reindex(true).then(() => setReloadToken((token) => token + 1));
+              }}
+              title="Re-read every transcript, ignoring the freshness check"
+            >
+              rebuild index
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -166,7 +192,10 @@ function Routed(props: { route: ReturnType<typeof useRoute>; reloadToken: number
       return <Analytics reloadToken={reloadToken} />;
     case 'doctor':
       return <Doctor reloadToken={reloadToken} />;
-    default:
+    case 'fleet':
       return <Fleet reloadToken={reloadToken} />;
+    default:
+      // '#/', '#/hq', an empty hash and anything unrecognised all land on HQ.
+      return <Hq reloadToken={reloadToken} />;
   }
 }

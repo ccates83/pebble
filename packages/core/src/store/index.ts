@@ -2,9 +2,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import type { Issue, SessionStatus, SessionSummary, TokenCounts } from '../types.ts';
+import type { Issue, SessionStatus, SessionSummary, SubagentSummary, TokenCounts } from '../types.ts';
 import { pebbleDataDir } from '../paths.ts';
-import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
+import { DATA_TABLES, SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
 
 export interface SessionFilter {
   adapter?: string;
@@ -66,6 +66,29 @@ export interface IndexStats {
   approximateSessions: number;
 }
 
+/** One stored sub-agent run, joined to where its parent session ran. */
+export interface SubagentRun {
+  adapter: string;
+  parentSessionId: string;
+  /** The parent session's working directory — sub-agents are placed by their parent. */
+  parentProjectPath: string;
+  id: string;
+  agentType: string | null;
+  title: string;
+  status: SessionStatus;
+  errorCount: number;
+  startedAt: string;
+  lastActivityAt: string;
+}
+
+export interface SessionWrite {
+  promptPreview: string | null;
+  toolHistogram: Record<string, number>;
+  sourceMtimeMs: number;
+  /** Replaces every stored sub-agent run for this session. Absent means none. */
+  subagents?: SubagentSummary[];
+}
+
 type Row = Record<string, unknown>;
 
 const num = (value: unknown): number => (typeof value === 'number' ? value : Number(value ?? 0) || 0);
@@ -98,8 +121,29 @@ export class PebbleStore {
     // WAL lets the dashboard read while the indexer writes.
     if (path !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA foreign_keys = ON;');
+    this.rebuildIfOutdated();
     this.db.exec(SCHEMA_SQL);
     this.setMeta('schema_version', String(SCHEMA_VERSION));
+  }
+
+  /**
+   * The index is a cache, so a schema change is handled by throwing it away
+   * rather than migrating it: drop every derived table and let the next index
+   * pass rebuild from the source files. Without this, `CREATE TABLE IF NOT
+   * EXISTS` would leave an old table shape in place and `isFresh` would skip
+   * every unchanged session, so new columns or tables would never fill.
+   */
+  private rebuildIfOutdated(): void {
+    let stored: string | null = null;
+    try {
+      const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as Row | undefined;
+      stored = row ? str(row.value) : null;
+    } catch {
+      return; // No meta table: a fresh database.
+    }
+    if (stored === null || stored === String(SCHEMA_VERSION)) return;
+    for (const table of DATA_TABLES) this.db.exec(`DROP TABLE IF EXISTS ${table}`);
+    this.db.prepare("DELETE FROM meta WHERE key = 'last_indexed_at'").run();
   }
 
   close(): void {
@@ -152,7 +196,7 @@ export class PebbleStore {
    * Writes one session. The row is replaced in full from the parsed file —
    * never merged — so a short read can never blank out a good value.
    */
-  upsertSession(summary: SessionSummary, extras: { promptPreview: string | null; toolHistogram: Record<string, number>; sourceMtimeMs: number }): void {
+  upsertSession(summary: SessionSummary, extras: SessionWrite): void {
     this.tx(() => {
       this.db
         .prepare(
@@ -250,6 +294,30 @@ export class PebbleStore {
       for (const [tool, calls] of Object.entries(extras.toolHistogram)) {
         insertTool.run(summary.adapter, summary.id, tool, calls);
       }
+
+      // Replaced with the parent, never merged: a sub-agent that is no longer on
+      // disk must not linger as a department's "last run".
+      this.db.prepare('DELETE FROM subagents WHERE adapter = ? AND session_id = ?').run(summary.adapter, summary.id);
+      const insertSub = this.db.prepare(
+        `INSERT OR REPLACE INTO subagents (
+          adapter, session_id, id, agent_type, title, status, pending_tool_calls, error_count,
+          started_at, last_activity_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      );
+      for (const sub of extras.subagents ?? []) {
+        insertSub.run(
+          summary.adapter,
+          summary.id,
+          sub.id,
+          sub.agentType,
+          sub.title,
+          sub.status,
+          sub.pendingToolCalls ?? 0,
+          sub.errorCount,
+          sub.startedAt,
+          sub.lastActivityAt,
+        );
+      }
     });
   }
 
@@ -262,10 +330,12 @@ export class PebbleStore {
       const del = this.db.prepare('DELETE FROM sessions WHERE adapter = ? AND id = ?');
       const delModels = this.db.prepare('DELETE FROM session_models WHERE adapter = ? AND id = ?');
       const delTools = this.db.prepare('DELETE FROM tool_usage WHERE adapter = ? AND id = ?');
+      const delSubs = this.db.prepare('DELETE FROM subagents WHERE adapter = ? AND session_id = ?');
       for (const id of stale) {
         del.run(adapter, id);
         delModels.run(adapter, id);
         delTools.run(adapter, id);
+        delSubs.run(adapter, id);
       }
     });
     return stale.length;
@@ -284,6 +354,17 @@ export class PebbleStore {
     this.db
       .prepare(
         `UPDATE sessions SET status = CASE
+           WHEN last_activity_at >= ? THEN 'active'
+           WHEN last_activity_at >= ? AND pending_tool_calls > 0 THEN 'waiting'
+           WHEN last_activity_at >= ? THEN 'idle'
+           ELSE 'done'
+         END
+         WHERE last_activity_at <= ?`,
+      )
+      .run(activeCutoff, idleCutoff, idleCutoff, nowIso);
+    this.db
+      .prepare(
+        `UPDATE subagents SET status = CASE
            WHEN last_activity_at >= ? THEN 'active'
            WHEN last_activity_at >= ? AND pending_tool_calls > 0 THEN 'waiting'
            WHEN last_activity_at >= ? THEN 'idle'
@@ -341,6 +422,51 @@ export class PebbleStore {
     const { sql, params } = this.buildWhere(filter);
     const row = this.db.prepare(`SELECT COUNT(*) AS n FROM sessions s ${sql}`).get(...params) as Row | undefined;
     return num(row?.n);
+  }
+
+  /**
+   * Sessions whose working directory is `root` or anywhere beneath it, newest
+   * first. Compared with `substr`, not `LIKE`, because `_` and `%` are ordinary
+   * characters in a path (`_archive/`).
+   */
+  listSessionsUnder(root: string, limit = 5000): SessionSummary[] {
+    const base = root.replace(/\/+$/, '');
+    const prefix = `${base}/`;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM sessions
+         WHERE project_path = ? OR substr(project_path, 1, ?) = ?
+         ORDER BY last_activity_at DESC LIMIT ?`,
+      )
+      .all(base, prefix.length, prefix, Math.max(1, limit)) as Row[];
+    return rows.map(rowToSummary);
+  }
+
+  /** Stored sub-agent runs whose parent session ran at or beneath `root`, newest first. */
+  listSubagentRunsUnder(root: string, limit = 5000): SubagentRun[] {
+    const base = root.replace(/\/+$/, '');
+    const prefix = `${base}/`;
+    const rows = this.db
+      .prepare(
+        `SELECT a.*, s.project_path AS parent_project_path
+         FROM subagents a
+         JOIN sessions s ON s.adapter = a.adapter AND s.id = a.session_id
+         WHERE s.project_path = ? OR substr(s.project_path, 1, ?) = ?
+         ORDER BY a.last_activity_at DESC LIMIT ?`,
+      )
+      .all(base, prefix.length, prefix, Math.max(1, limit)) as Row[];
+    return rows.map((r) => ({
+      adapter: str(r.adapter),
+      parentSessionId: str(r.session_id),
+      parentProjectPath: str(r.parent_project_path),
+      id: str(r.id),
+      agentType: nullableStr(r.agent_type),
+      title: str(r.title),
+      status: str(r.status) as SessionStatus,
+      errorCount: num(r.error_count),
+      startedAt: str(r.started_at),
+      lastActivityAt: str(r.last_activity_at),
+    }));
   }
 
   getSession(adapter: string, id: string): SessionSummary | null {

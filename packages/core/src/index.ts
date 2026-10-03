@@ -4,7 +4,7 @@ export { ClaudeCodeAdapter } from './adapters/claude-code/index.ts';
 export { parseTranscript, ADAPTER_ID as CLAUDE_CODE_ADAPTER_ID } from './adapters/claude-code/transcript.ts';
 export { claudeRoot, projectsDir, decodeProjectDirName, encodeProjectPath } from './adapters/claude-code/paths.ts';
 export { scanClaudeConfig, findShadowed } from './adapters/claude-code/config.ts';
-export { findSubagentFiles, rollupSubagents, subagentDir } from './adapters/claude-code/subagents.ts';
+export { findSubagentFiles, rollupSubagents, subagentDir, readSubagentAgentType } from './adapters/claude-code/subagents.ts';
 export type { SubagentRollup } from './adapters/claude-code/subagents.ts';
 export type { ScanConfigOptions } from './adapters/claude-code/config.ts';
 export { PebbleStore } from './store/index.ts';
@@ -15,6 +15,8 @@ export type {
   ModelRollup,
   ToolRollup,
   IndexStats,
+  SubagentRun,
+  SessionWrite,
 } from './store/index.ts';
 export { SCHEMA_VERSION } from './store/schema.ts';
 export { Indexer, IndexLoop } from './indexer.ts';
@@ -35,5 +37,7 @@ export {
 export { deriveStatus, DEFAULT_WINDOWS } from './status.ts';
 export type { StatusWindows } from './status.ts';
 export { parseFrontmatter, asString } from './frontmatter.ts';
+export type { Frontmatter, FrontmatterOptions } from './frontmatter.ts';
 export { expandHome, pebbleDataDir } from './paths.ts';
 export { mapLimit } from './util.ts';
+export * from './org/index.ts';

@@ -64,12 +64,16 @@ export interface SubagentSummary {
   /** Claude Code's `agentId`. */
   id: string;
   parentSessionId: string;
+  /** Which agent definition ran (e.g. a department agent), when the host recorded it. */
+  agentType: string | null;
   /** The task it was handed, truncated. */
   title: string;
   models: string[];
   startedAt: string;
   lastActivityAt: string;
   status: SessionStatus;
+  /** Tool calls still awaiting a result; what lets the index tell `waiting` from `idle`. */
+  pendingToolCalls?: number;
   toolCalls: number;
   tokens: TokenCounts;
   cost: Cost;
@@ -280,6 +284,12 @@ export interface IndexedSession {
   promptPreview: string | null;
   toolHistogram: Record<string, number>;
   sourceMtimeMs: number;
+  /**
+   * The session's sub-agent runs, when the adapter has them. Stored alongside the
+   * session row and replaced with it, so department activity can be answered from
+   * the index without re-parsing transcripts.
+   */
+  subagents?: SubagentSummary[];
 }
 
 /**
@@ -317,4 +327,223 @@ export interface AgentAdapter {
 
   /** Parses exactly one source. Returns null if it has become unreadable. */
   summarizeSource?(source: SessionSource): Promise<IndexedSession | null>;
+}
+
+// ---------------------------------------------------------------------------
+// Org surface — the holding company Pebble lives inside.
+//
+// Read from `org.json` and the vault conventions under the org root
+// (approvals, inbox, self-improvements, changelogs, reviews). Like everything
+// else in Pebble this is read-only: the vaults are Connor's, and Pebble only
+// looks. None of it is vendor-specific, so it lives outside the adapters.
+// ---------------------------------------------------------------------------
+
+/** A markdown note in one of the org's vaults, described from its frontmatter. */
+export interface OrgNote {
+  /** Absolute path. */
+  path: string;
+  /** Path relative to the org root, for display. */
+  relPath: string;
+  /** Frontmatter `title`, else the file name. */
+  title: string;
+  summary: string | null;
+  /** Frontmatter `status`, verbatim. */
+  status: string | null;
+  /** Frontmatter `updated`/`created` as written, else the file's mtime (ISO). */
+  updated: string | null;
+  /** Frontmatter `created` as written. */
+  created?: string | null;
+}
+
+/** A Tier 1 request filed in `<vault>/07 System/Approvals/`. */
+export interface ApprovalRequest extends OrgNote {
+  department: string | null;
+  requestedBy: string | null;
+  tier: number | null;
+  /** publish | send | spend | commit | account | deploy | other, verbatim. */
+  action: string | null;
+  /** Provisional, as the agent wrote it. */
+  amountUsd: number | null;
+  due: string | null;
+  created: string | null;
+  decided: string | null;
+}
+
+/** One `- YYYY-MM-DD — actor — what` line from a vault's CHANGELOG.md. */
+export interface ChangelogEntry {
+  date: string;
+  actor: string;
+  text: string;
+  /** 'hq' or a subsidiary id. */
+  unit: string;
+}
+
+/** One row of a department scorecard table. Values are verbatim strings. */
+export interface ScorecardKpi {
+  name: string;
+  target: string | null;
+  baseline: string | null;
+  latest: string | null;
+  /** The "Red if" column. */
+  redIf?: string | null;
+  source: string | null;
+  /** 'provisional' | 'verified' | whatever was written. */
+  verified: string | null;
+}
+
+export interface OrgDepartment {
+  id: string;
+  name: string;
+  /** Absolute path of the department folder. */
+  path: string;
+  /** The agent name that runs it (matches `.claude/agents/<agent>.md`). */
+  agent: string;
+  folderExists: boolean;
+  agentDefined: boolean;
+  scorecard: { path: string; kpis: ScorecardKpi[] } | null;
+}
+
+export interface Subsidiary {
+  id: string;
+  name: string;
+  /** consulting | marketplace | content | software | other, verbatim. */
+  type: string;
+  /** planning | active | paused | archived, verbatim from org.json. */
+  status: string;
+  /** Absolute vault path. */
+  path: string;
+  exists: boolean;
+  created: string | null;
+  archived: string | null;
+  departments: OrgDepartment[];
+  /** `filled` is false while the charter still carries its "Connor to fill in" marker. */
+  charter: (OrgNote & { filled: boolean }) | null;
+  /** Every approval request, newest first, whatever its status. */
+  approvals: ApprovalRequest[];
+  /** Notes waiting in `00 Inbox` (index files and .gitkeep excluded). */
+  inbox: OrgNote[];
+  /** `06 Self Improvements` notes with `status: proposed`. */
+  proposals: OrgNote[];
+  /** Newest `08 Reviews/*Weekly Review.md`, if any. */
+  lastReview: OrgNote | null;
+  /** Newest first, capped. */
+  changelog: ChangelogEntry[];
+  /** Structural problems — the same checks as `org status`. */
+  drift: Issue[];
+}
+
+export interface HqVault {
+  path: string;
+  exists: boolean;
+  inbox: OrgNote[];
+  proposals: OrgNote[];
+  /** Most recent decisions in `05 Decisions`, newest first. */
+  decisions: OrgNote[];
+  changelog: ChangelogEntry[];
+}
+
+export interface OrgSnapshot {
+  /** Directory holding org.json. */
+  root: string;
+  orgFile: string;
+  name: string | null;
+  updated: string | null;
+  hq: HqVault;
+  subsidiaries: Subsidiary[];
+  tooling: Array<{ id: string; path: string; role: string | null }>;
+  /** Anything unreadable or malformed. Never thrown. */
+  issues: Issue[];
+  readAt: string;
+}
+
+/** Where a session sits in the org, judged from its working directory. */
+export interface OrgPlacement {
+  scope: 'hq' | 'subsidiary' | 'tooling' | 'outside';
+  /** 'hq', a subsidiary id or a tooling id; null when outside the org. */
+  unit: string | null;
+  /**
+   * Department id, when the session itself ran as a department agent or
+   * spawned one. Null means "the unit, not a specific department".
+   */
+  department: string | null;
+}
+
+export type AttentionKind =
+  | 'approval'
+  | 'waiting-session'
+  | 'session-errors'
+  | 'drift'
+  | 'inbox'
+  | 'proposal'
+  | 'charter'
+  | 'review-overdue'
+  | 'org-issue';
+
+/** Something Connor needs to act on. Derived on every read; never stored. */
+export interface AttentionItem {
+  /** Stable within a read, for React keys. */
+  id: string;
+  kind: AttentionKind;
+  level: IssueLevel;
+  /** 'hq', a subsidiary id, or null for org-wide. */
+  unit: string | null;
+  department: string | null;
+  title: string;
+  detail: string | null;
+  /** The file to open, when there is one. */
+  path: string | null;
+  session: { adapter: string; id: string } | null;
+  /** When it arose, or for approvals the `due` date if set. */
+  at: string | null;
+}
+
+/** What one department's agent has been doing, from the session index. */
+export interface DepartmentActivity {
+  department: string;
+  agent: string;
+  /** Runs (sessions or sub-agent runs) in the last 7 days. */
+  runs7d: number;
+  lastActivityAt: string | null;
+  /** Status of its most recent run. */
+  status: SessionStatus | null;
+  /** Title of its most recent run — "what it's working on". */
+  lastTitle: string | null;
+  lastSession: { adapter: string; id: string } | null;
+}
+
+/** HQ, a subsidiary, or a tooling repo, with its sessions joined in. */
+export interface HqUnit {
+  id: string;
+  kind: 'hq' | 'subsidiary' | 'tooling';
+  name: string;
+  /** Sessions currently active, waiting or idle, each with its placement. */
+  live: Array<SessionSummary & { placement: OrgPlacement }>;
+  /** Most recent sessions, newest first, capped. */
+  recent: Array<SessionSummary & { placement: OrgPlacement }>;
+  departments: DepartmentActivity[];
+  sessions7d: number;
+  /** Sum of session cost over 7 days; `approximate` if any figure was less than measured. */
+  cost7d: { usd: number; approximate: boolean };
+  lastActivityAt: string | null;
+}
+
+/** GET /api/hq */
+export interface HqOverview {
+  /** Where Pebble looked for org.json, and how it decided. */
+  orgRoot: string;
+  orgRootSource: 'flag' | 'env' | 'discovered' | 'default';
+  /** Null when no org.json was found; the UI explains how to point Pebble at one. */
+  org: OrgSnapshot | null;
+  /** Why `org` is null, in words. Absent when the org was read. */
+  orgError?: string | null;
+  /**
+   * Most urgent first: level (error, warn, info), then kind in the order
+   * approval, waiting-session, session-errors, drift, inbox, proposal, charter,
+   * review-overdue, org-issue; then `at` — soonest due first for approvals,
+   * newest first for everything else.
+   */
+  attention: AttentionItem[];
+  units: HqUnit[];
+  /** Sessions in the index that sit outside the org entirely, last 7 days. */
+  outside7d: number;
 }

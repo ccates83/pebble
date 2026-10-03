@@ -18,8 +18,8 @@ that rather than reaching into `packages/core`.
 
 - **No inline styles.** Classes only. The sole exception is passing a magnitude to
   CSS as a custom property, as `Bars` and `Meter` do.
-- **No component hard-codes a colour.** Everything comes from `tokens.css`. Four
-  brand roles, two semantic states, and adding a seventh is a conversation.
+- **No component hard-codes a colour.** Everything comes from `tokens.css`
+  (the cozy-sim palette, day and night; see `docs/DESIGN.md`).
 - **Every table column sorts.** Use `DataTable`; omit `key` only for a genuinely
   display-only column.
 - **Cap rows**, with "show more" below.
@@ -27,10 +27,13 @@ that rather than reaching into `packages/core`.
   and models.
 - **No hero metric cards.** Numbers go inline with `Stat`, where they are
   actionable.
-- **No glassmorphism, gradient text, cards inside cards, or modals.** Expand
-  inline.
-- **Fonts**: Fraunces for headings, Public Sans for body, IBM Plex Mono for
+- **No glassmorphism, gradient text, or modals.** Inspect inline. Nesting is
+  allowed only where it *is* the information (town → building → room → desk).
+- **Fonts**: Fredoka for headings and signs, Nunito for body, JetBrains Mono for
   identifiers. Never a system default.
+- **Status is never colour alone** — every sprite state has a pose and a caption.
+  Sprites are hand-built inline SVG; animate with CSS and respect
+  `prefers-reduced-motion`.
 - **Tabular numerals** on anything in a column.
 - **Never render fabricated data.** An empty state says what would fill it.
 

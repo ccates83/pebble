@@ -51,3 +51,32 @@ test('asString flattens whatever frontmatter produced', () => {
   assert.equal(asString(true), 'true');
   assert.equal(asString(undefined), null);
 });
+
+test('stripComments drops trailing YAML comments the org templates carry', () => {
+  const text = [
+    '---',
+    'status: pending      # pending → approved | denied → done',
+    'requested_by:        # agent name',
+    'action: publish      # publish | send | spend',
+    'tier: 1',
+    'title: "Issue #42 # not a comment inside quotes"',
+    'note: price#1 stays',
+    'tags:',
+    '  - a   # first',
+    '---',
+    '',
+  ].join('\n');
+  const { data } = parseFrontmatter(text, { stripComments: true });
+  assert.equal(data.status, 'pending');
+  assert.equal(data.requested_by, undefined, 'a value that is only a comment is empty');
+  assert.equal(data.action, 'publish');
+  assert.equal(data.tier, 1);
+  assert.equal(data.title, 'Issue #42 # not a comment inside quotes');
+  assert.equal(data.note, 'price#1 stays', 'a # without leading space is literal, as in YAML');
+  assert.deepEqual(data.tags, ['a']);
+});
+
+test('comments are kept verbatim unless asked for, so existing callers are unchanged', () => {
+  const { data } = parseFrontmatter('---\ndescription: Fix issue #42 fast\n---\n');
+  assert.equal(data.description, 'Fix issue #42 fast');
+});

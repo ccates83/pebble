@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import type { Cost, SubagentSummary, TokenCounts } from '../../types.ts';
@@ -49,6 +49,35 @@ export async function findSubagentFiles(sessionTranscriptPath: string): Promise<
   return files.sort((a, b) => a.mtimeMs - b.mtimeMs);
 }
 
+/** Where Claude Code records which agent definition a sub-agent ran as. */
+export function subagentMetaPath(transcriptPath: string): string {
+  return transcriptPath.replace(/\.jsonl$/, '.meta.json');
+}
+
+/**
+ * Reads `agentType` from `agent-<id>.meta.json`, written next to each sub-agent
+ * transcript (`{"agentType":"general-purpose","description":...}`). Older
+ * versions did not write the file at all, and a file being written can be
+ * truncated, so anything other than a non-empty string is "unknown" — null, not
+ * an error. This is a nicety; it must never cost the transcript its row.
+ */
+export async function readSubagentAgentType(transcriptPath: string): Promise<string | null> {
+  let raw: string;
+  try {
+    raw = await readFile(subagentMetaPath(transcriptPath), 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const agentType = (parsed as Record<string, unknown>).agentType;
+    return typeof agentType === 'string' && agentType.trim().length > 0 ? agentType.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface SubagentRollup {
   subagents: SubagentSummary[];
   count: number;
@@ -84,11 +113,13 @@ export async function rollupSubagents(
     const subagent: SubagentSummary = {
       id: file.agentId,
       parentSessionId,
+      agentType: await readSubagentAgentType(file.path),
       title: s.titleSource === 'prompt' || s.titleSource === 'custom' || s.titleSource === 'ai' ? s.title : `agent ${file.agentId.slice(0, 8)}`,
       models: s.models,
       startedAt: s.startedAt,
       lastActivityAt: s.lastActivityAt,
       status: s.status,
+      pendingToolCalls: s.pendingToolCalls,
       toolCalls: s.toolCalls,
       tokens: s.tokens,
       cost: s.cost,

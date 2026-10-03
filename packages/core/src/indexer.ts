@@ -121,6 +121,7 @@ export class Indexer {
           promptPreview: indexed.promptPreview,
           toolHistogram: indexed.toolHistogram,
           sourceMtimeMs: indexed.sourceMtimeMs,
+          subagents: indexed.subagents,
         });
         result.updated += 1;
       } catch (error) {

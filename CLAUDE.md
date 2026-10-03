@@ -6,7 +6,8 @@ what your configuration actually adds up to.
 
 **v1 is read-only.** Pebble never writes to `~/.claude`, never spawns or stops an
 agent, and never makes a network request. Its own index lives in `~/.pebble` and
-can be deleted at any time. Keep it that way unless the user explicitly asks for
+can be deleted at any time. Pebble also reads the org root (`org.json` and the
+HQ and subsidiary vaults under it) and never writes to it. Keep it that way unless the user explicitly asks for
 control features — the read-only guarantee is the main reason this is safe to run
 against a real machine, and it is stated in the README, the CLI help and the UI.
 
@@ -100,8 +101,9 @@ When updating it, load the `claude-api` skill rather than recalling rates.
 
 ### UI rules
 
-The dashboard follows a deliberate anti-generic brief. `docs/DESIGN.md` is the
-full version; the rules that get broken most often:
+The dashboard is a cozy-sim "office floor": subsidiaries are buildings,
+departments are rooms, agents are sprites at desks. `docs/DESIGN.md` is the full
+version; the rules that get broken most often:
 
 - **No inline styles.** Classes only. The two exceptions are `Bars` and `Meter`,
   which pass a magnitude to CSS as a custom property — colour, radius and
@@ -110,10 +112,12 @@ full version; the rules that get broken most often:
   offer "show more" instead of rendering hundreds.
 - **Filter pills, not dropdowns**, for small sets. Filters are visible state.
 - **No hero metric cards.** Numbers go inline where they are actionable.
-- **No glassmorphism, gradient text, cards inside cards, or modals.** Expand
-  inline instead.
-- **Four colour roles plus two semantic states**, all in `styles/tokens.css`. No
+- **No glassmorphism, gradient text, or modals.** Inspect inline instead. The
+  map nests town → building → room → desk because that hierarchy is the data;
+  don't nest containers anywhere else.
+- **All colour lives in `styles/tokens.css`** (day and night palettes). No
   component hard-codes a colour.
+- **Status is never colour alone.** Every agent state has a pose and a caption.
 - **Never show fabricated or interpolated data.** If something could not be read,
   say so.
 

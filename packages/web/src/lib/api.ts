@@ -3,6 +3,7 @@ import type {
   ConfigSurface,
   DailyCost,
   DoctorReport,
+  HqOverview,
   IndexResult,
   IndexStats,
   ModelRollup,
@@ -84,11 +85,13 @@ export const api = {
   analytics: (days: number) => request<Analytics>(`/api/analytics${query({ days })}`),
   config: (refresh = false) => request<{ surfaces: ConfigSurface[] }>(`/api/config${query({ refresh: refresh ? 1 : undefined })}`),
   doctor: (refresh = false) => request<DoctorReport>(`/api/doctor${query({ refresh: refresh ? 1 : undefined })}`),
+  hq: () => request<HqOverview>('/api/hq'),
   reindex: (force = false) => request<IndexResult>(`/api/index${query({ force: force ? 1 : undefined })}`, { method: 'POST' }),
 };
 
 export interface StreamEvent {
-  type: 'hello' | 'ping' | 'index';
+  /** `index`: the session index changed. `org`: something in the org's vaults changed. */
+  type: 'hello' | 'ping' | 'index' | 'org';
   at: string;
   updated?: number;
   durationMs?: number;

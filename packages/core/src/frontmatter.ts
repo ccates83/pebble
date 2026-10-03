@@ -38,7 +38,32 @@ function unquote(value: string): string {
   return value;
 }
 
-export function parseFrontmatter(content: string): Frontmatter {
+export interface FrontmatterOptions {
+  /**
+   * Treat ` #` and everything after it as a YAML comment. Off by default because
+   * agent and skill descriptions are free prose where a `#` is usually literal;
+   * on for the org vaults, whose templates annotate values in place
+   * (`status: pending      # pending → approved | denied → done`). A quoted value
+   * keeps its `#`.
+   */
+  stripComments?: boolean;
+}
+
+/** Drops a trailing YAML comment from an unquoted scalar. */
+function stripComment(raw: string): string {
+  const value = raw.trim();
+  if (value.startsWith('#')) return '';
+  const quote = value[0];
+  if (quote === '"' || quote === "'") {
+    const close = value.indexOf(quote, 1);
+    if (close > 0) return value.slice(0, close + 1);
+    return value;
+  }
+  const hash = value.search(/\s#/);
+  return hash === -1 ? value : value.slice(0, hash).trimEnd();
+}
+
+export function parseFrontmatter(content: string, options: FrontmatterOptions = {}): Frontmatter {
   const normalized = content.startsWith('﻿') ? content.slice(1) : content;
   const lines = normalized.split(/\r?\n/);
   if (lines[0]?.trim() !== '---') return { data: {}, body: normalized, present: false };
@@ -63,14 +88,15 @@ export function parseFrontmatter(content: string): Frontmatter {
     // Block-list continuation: "  - value"
     const listItem = /^\s*-\s+(.*)$/.exec(line);
     if (listItem && pendingKey) {
-      pendingList.push(unquote((listItem[1] ?? '').trim()));
+      const item = options.stripComments ? stripComment(listItem[1] ?? '') : (listItem[1] ?? '').trim();
+      pendingList.push(unquote(item));
       continue;
     }
     const pair = /^([A-Za-z0-9_.-]+)\s*:\s*(.*)$/.exec(line);
     if (!pair) continue;
     flush();
     const key = pair[1] ?? '';
-    const rest = pair[2] ?? '';
+    const rest = options.stripComments ? stripComment(pair[2] ?? '') : (pair[2] ?? '');
     if (rest.trim() === '') {
       pendingKey = key;
       continue;

@@ -8,7 +8,10 @@ import {
   AdapterRegistry,
   Indexer,
   PebbleStore,
+  buildHqOverview,
+  loadOrg,
   runDoctor,
+  type OrgRootResolution,
   type ConfigSurface,
   type SessionFilter,
   type SessionStatus,
@@ -22,6 +25,8 @@ export interface AppDeps {
   bus: EventBus;
   /** Built web assets to serve. Omit to run API-only. */
   webRoot?: string;
+  /** Where the org lives. Resolved once at startup; the org itself is read per request. */
+  org: OrgRootResolution;
   startedAt: Date;
 }
 
@@ -133,6 +138,13 @@ export function createApp(deps: AppDeps): Hono {
       projects: deps.store.projectRollup().slice(0, 12),
       daily: deps.store.dailyCost(30),
     });
+  });
+
+  // Read fresh on every request: it is a few dozen small files, and a cached
+  // copy would show an approval as pending after Connor has decided it.
+  app.get('/api/hq', async (c) => {
+    const load = await loadOrg(deps.org);
+    return c.json(buildHqOverview(deps.store, load.org, Date.now(), load));
   });
 
   app.get('/api/sessions', (c) => {

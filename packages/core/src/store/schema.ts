@@ -11,7 +11,13 @@
  *    search. Detail views re-read the transcript, so Pebble never becomes a
  *    second copy of everything you have ever said to an agent.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
+
+/**
+ * Every derived table, so a version change can drop them all. `meta` survives;
+ * it holds nothing that cannot be rewritten.
+ */
+export const DATA_TABLES = ['sessions', 'session_models', 'tool_usage', 'subagents'] as const;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -90,4 +96,23 @@ CREATE TABLE IF NOT EXISTS tool_usage (
 );
 
 CREATE INDEX IF NOT EXISTS tool_usage_tool ON tool_usage (tool);
+
+-- Sub-agent runs, written and deleted with their parent session's row. Only
+-- what department activity needs: who ran, on what, and when. Cost is not here;
+-- it stays on the parent as the separate sub-agent figure.
+CREATE TABLE IF NOT EXISTS subagents (
+  adapter            TEXT NOT NULL,
+  session_id         TEXT NOT NULL,
+  id                 TEXT NOT NULL,
+  agent_type         TEXT,
+  title              TEXT NOT NULL,
+  status             TEXT NOT NULL,
+  pending_tool_calls INTEGER NOT NULL DEFAULT 0,
+  error_count        INTEGER NOT NULL DEFAULT 0,
+  started_at         TEXT NOT NULL,
+  last_activity_at   TEXT NOT NULL,
+  PRIMARY KEY (adapter, session_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS subagents_agent_type ON subagents (agent_type);
 `;

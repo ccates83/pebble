@@ -1,53 +1,124 @@
 /*
- * Pebble's design tokens.
+ * Pebble's design tokens — "cozy sim".
  *
- * Four brand colours with non-overlapping roles, plus two semantic state
- * colours (a status light has to be readable as a status light, and overloading
- * the accent for "running" would make every interactive element look live).
+ * A warm, illustrated palette: parchment ground, soft wood, sage, dusty rose,
+ * sky and butter. Every colour in the app comes from this file; components and
+ * sprites only ever reference a variable. Retheming is editing this file.
  *
- * Everything else — surfaces, rules, muted text — is derived from these, so
- * retheming is editing this block and nothing else. No component hard-codes a
- * colour, and nothing in this project uses an inline style.
+ * Roles, not paint:
+ *   brand roles     --c-primary --c-accent --c-signal --c-bg
+ *   semantic states --c-live (working now) --c-fault (errors, broken links)
+ *   scenery         wood, walls, roofs, grass, skin, hair, sprite tints
+ *
+ * Scenery colours are for the office map's illustration only. They never carry
+ * meaning on their own: a status is always also a word or a shape.
  */
 :root {
   /* -- brand roles ------------------------------------------------------- */
-  --c-primary: #33332c;   /* headings, nav, strong text */
-  --c-accent: #9a4a2f;    /* interactive: links, active nav, selected rows */
-  --c-signal: #a9741f;    /* attention: warnings, estimated figures */
-  --c-bg: #f2efe9;        /* page — limestone, never #fff */
+  --c-primary: #4a3527;   /* headings, strong text — walnut ink */
+  --c-accent: #a5485a;    /* interactive: links, selection — dusty berry */
+  --c-signal: #a86a12;    /* attention, estimates — honey */
+  --c-bg: #f3e8d0;        /* page — parchment, never #fff */
 
   /* -- semantic states --------------------------------------------------- */
-  --c-live: #3f6f4f;      /* an agent is working right now */
-  --c-fault: #a33528;     /* errors, failures, broken links */
+  --c-live: #4f7d43;      /* an agent is working right now — sage leaf */
+  --c-fault: #b0433a;     /* errors, failures — brick */
 
-  /* -- derived ----------------------------------------------------------- */
-  --c-surface: #faf8f4;
-  --c-surface-sunk: #ebe7df;
-  --c-rule: #d9d3c7;
-  --c-rule-strong: #c2baa9;
-  --c-text: #33332c;
-  --c-text-muted: #6d6a5e;
-  --c-text-faint: #8d8979;
-  /* Tints for row/pill backgrounds — a wash, never a coloured left border. */
-  --c-accent-wash: rgb(154 74 47 / 9%);
-  --c-live-wash: rgb(63 111 79 / 11%);
-  --c-signal-wash: rgb(169 116 31 / 13%);
-  --c-fault-wash: rgb(163 53 40 / 10%);
+  /* -- derived surfaces and text ---------------------------------------- */
+  --c-surface: #fbf4e3;
+  --c-surface-sunk: #eadbbb;
+  --c-rule: #dcc9a3;
+  --c-rule-strong: #c4ab7e;
+  --c-text: #4a3527;
+  --c-text-muted: #7a6450;
+  --c-text-faint: #8f7a63;
+  --c-accent-wash: rgb(165 72 90 / 11%);
+  --c-live-wash: rgb(79 125 67 / 14%);
+  --c-signal-wash: rgb(196 140 40 / 18%);
+  --c-fault-wash: rgb(176 67 58 / 12%);
+  --c-shadow: rgb(94 64 38 / 18%);
+  --c-on-wood: #fbf0dc;   /* text set on a wooden sign */
+
+  /* -- scenery: the office map ------------------------------------------ */
+  --c-wood: #b98552;
+  --c-wood-light: #d6a978;
+  --c-wood-dark: #84583a;
+  --c-wall: #fbf1dc;
+  --c-wall-shade: #efdfbf;
+  --c-floor: #e2c497;
+  --c-floor-line: #d2af80;
+  --c-grass: #a9c48a;
+  --c-grass-dark: #8aab6c;
+  --c-path: #e6d3ad;
+  --c-window: #cfe3ea;
+  --c-glass-glow: #fff3c4;
+  --c-paper: #fffaf0;
+  --c-ink: #4a3527;
+  /* Paper stays light in both themes, so what is printed on it keeps its own
+     ink: these do not change at night. */
+  --c-ink-muted: #7a6450;
+  --c-accent-ink: #a5485a;
+  --c-signal-ink: #8f5a0c;
+  --c-fault-ink: #a83d34;
+  --c-live-ink: #44703a;
+  --c-screen-off: #6d7a82;
+  --c-screen-on: #bfe6d2;
+  --c-plant: #6f9a5b;
+  --c-pot: #c97b5a;
+  --c-mug: #e8eef2;
+  --c-board: #7a8f6a;   /* the notice board's felt */
+  --c-cobweb: #fdf7ea;   /* silk, drawn over a roof */
+
+  /* Roofs, one per building, cycled. */
+  --c-roof-1: #c97a7a;  /* dusty rose */
+  --c-roof-2: #7fa37a;  /* sage */
+  --c-roof-3: #7f9fc0;  /* sky */
+  --c-roof-4: #d1a64e;  /* butter */
+  --c-roof-5: #9b88b8;  /* lavender */
+  --c-roof-6: #c58a5c;  /* terracotta */
+
+  /* Sprite skin and hair. Varied by a hash, never meaningful. */
+  --c-skin-1: #f3cfae;
+  --c-skin-2: #dba77e;
+  --c-skin-3: #a97350;
+  --c-skin-4: #7a4f35;
+  --c-hair-1: #5b3a26;
+  --c-hair-2: #2f2a2a;
+  --c-hair-3: #c9873f;
+  --c-hair-4: #e2c27a;
+  --c-hair-5: #8a4b3a;
+  --c-cheek: #e79a8f;
+
+  /* Department tints: a shirt colour so a room is recognisable at a glance.
+     Twelve, assigned in order of first appearance across the org. */
+  --tint-1: #d98b8b;
+  --tint-2: #86b07a;
+  --tint-3: #84a9d1;
+  --tint-4: #e3bb5a;
+  --tint-5: #ab95cf;
+  --tint-6: #e09a6a;
+  --tint-7: #6fb3a8;
+  --tint-8: #c7849f;
+  --tint-9: #9fae5e;
+  --tint-10: #7d8fc4;
+  --tint-11: #d4a07e;
+  --tint-12: #8fb8c9;
+  --tint-worker: #97a6bb;
 
   /* -- type -------------------------------------------------------------- */
-  --font-display: Fraunces, 'Hoefler Text', 'Iowan Old Style', Palatino, Georgia, serif;
-  --font-body: 'Public Sans', 'Helvetica Neue', 'Segoe UI', sans-serif;
-  --font-mono: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --font-display: Fredoka, 'Baloo 2', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif;
+  --font-body: Nunito, 'Avenir Next', 'Segoe UI', 'Trebuchet MS', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
 
   --fs-micro: 0.6875rem;
-  --fs-small: 0.78125rem;
-  --fs-base: 0.875rem;
+  --fs-small: 0.8125rem;
+  --fs-base: 0.9rem;
   --fs-lead: 1rem;
   --fs-h3: 1.0625rem;
-  --fs-h2: clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem);
+  --fs-h2: clamp(1.2rem, 1.05rem + 0.6vw, 1.45rem);
   --fs-h1: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
 
-  /* -- space: varied on purpose, not one padding everywhere -------------- */
+  /* -- space ------------------------------------------------------------- */
   --sp-1: 0.25rem;
   --sp-2: 0.5rem;
   --sp-3: 0.75rem;
@@ -55,57 +126,122 @@
   --sp-5: 1.5rem;
   --sp-6: clamp(1.5rem, 1rem + 2vw, 2.5rem);
 
-  --radius: 3px;
+  /* Rounded everywhere: this is a soft, illustrated world. */
+  --radius: 8px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
-  /* Real objects decelerate; nothing here bounces. */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur: 140ms;
-  --rail-w: 13rem;
+  --dur: 160ms;
+  --rail-w: 13.5rem;
 }
 
 /*
- * Dark mode follows the system unless the page says otherwise, and
- * [data-theme="dark"] forces it. Nothing here is pure black — the surfaces are
- * tinted toward the same warm hue as the light theme.
+ * Night: the same world, lamp-lit. Deep plum and navy wood, warm lamplight for
+ * emphasis. Nothing is pure black. Follows the system unless [data-theme]
+ * forces a choice; the two blocks below must stay identical.
  */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-  --c-primary: #e8e3d7;
-  --c-accent: #d98762;
-  --c-signal: #d9a84e;
-  --c-bg: #1c1e1b;
-  --c-live: #74b088;
-  --c-fault: #e0806f;
-  --c-surface: #242723;
-  --c-surface-sunk: #171915;
-  --c-rule: #3a3e38;
-  --c-rule-strong: #4e534b;
-  --c-text: #e8e3d7;
-  --c-text-muted: #a5a294;
-  --c-text-faint: #807d71;
-  --c-accent-wash: rgb(217 135 98 / 14%);
-  --c-live-wash: rgb(116 176 136 / 15%);
-  --c-signal-wash: rgb(217 168 78 / 16%);
-  --c-fault-wash: rgb(224 128 111 / 15%);
+    --c-primary: #f3e3c4;
+    --c-accent: #eb9aa8;
+    --c-signal: #f0c062;
+    --c-bg: #221b2c;
+    --c-live: #9fd08e;
+    --c-fault: #f08c7e;
+    --c-surface: #2c2337;
+    --c-surface-sunk: #1b1524;
+    --c-rule: #43374f;
+    --c-rule-strong: #5c4d69;
+    --c-text: #efe2c9;
+    --c-text-muted: #c4b49d;
+    --c-text-faint: #a3927e;
+    --c-accent-wash: rgb(235 154 168 / 15%);
+    --c-live-wash: rgb(159 208 142 / 15%);
+    --c-signal-wash: rgb(240 192 98 / 17%);
+    --c-fault-wash: rgb(240 140 126 / 16%);
+    --c-shadow: rgb(8 4 14 / 45%);
+    --c-on-wood: #fbe9c6;
+
+    --c-wood: #6b4a3e;
+    --c-wood-light: #86604f;
+    --c-wood-dark: #46302b;
+    --c-wall: #3a2f47;
+    --c-wall-shade: #31283d;
+    --c-floor: #4a3a3f;
+    --c-floor-line: #3f3136;
+    --c-grass: #34473f;
+    --c-grass-dark: #2a3a33;
+    --c-path: #3b3243;
+    --c-window: #f2c86e;
+    --c-glass-glow: #f6d68b;
+    --c-paper: #f4e6c8;
+    --c-ink: #3b2a20;
+    --c-ink-muted: #6e5848;
+    --c-screen-off: #2a2433;
+    --c-screen-on: #9fe0c3;
+    --c-plant: #6f9a68;
+    --c-pot: #a8664c;
+    --c-mug: #d8d2cc;
+    --c-board: #4c5c45;
+    --c-cobweb: #e9dcc4;
+
+    --c-roof-1: #96566a;
+    --c-roof-2: #567a63;
+    --c-roof-3: #4f6890;
+    --c-roof-4: #a07c3a;
+    --c-roof-5: #6c5a91;
+    --c-roof-6: #94603f;
   }
 }
 
 :root[data-theme='dark'] {
-  --c-primary: #e8e3d7;
-  --c-accent: #d98762;
-  --c-signal: #d9a84e;
-  --c-bg: #1c1e1b;
-  --c-live: #74b088;
-  --c-fault: #e0806f;
-  --c-surface: #242723;
-  --c-surface-sunk: #171915;
-  --c-rule: #3a3e38;
-  --c-rule-strong: #4e534b;
-  --c-text: #e8e3d7;
-  --c-text-muted: #a5a294;
-  --c-text-faint: #807d71;
-  --c-accent-wash: rgb(217 135 98 / 14%);
-  --c-live-wash: rgb(116 176 136 / 15%);
-  --c-signal-wash: rgb(217 168 78 / 16%);
-  --c-fault-wash: rgb(224 128 111 / 15%);
+  --c-primary: #f3e3c4;
+  --c-accent: #eb9aa8;
+  --c-signal: #f0c062;
+  --c-bg: #221b2c;
+  --c-live: #9fd08e;
+  --c-fault: #f08c7e;
+  --c-surface: #2c2337;
+  --c-surface-sunk: #1b1524;
+  --c-rule: #43374f;
+  --c-rule-strong: #5c4d69;
+  --c-text: #efe2c9;
+  --c-text-muted: #c4b49d;
+  --c-text-faint: #a3927e;
+  --c-accent-wash: rgb(235 154 168 / 15%);
+  --c-live-wash: rgb(159 208 142 / 15%);
+  --c-signal-wash: rgb(240 192 98 / 17%);
+  --c-fault-wash: rgb(240 140 126 / 16%);
+  --c-shadow: rgb(8 4 14 / 45%);
+  --c-on-wood: #fbe9c6;
+
+  --c-wood: #6b4a3e;
+  --c-wood-light: #86604f;
+  --c-wood-dark: #46302b;
+  --c-wall: #3a2f47;
+  --c-wall-shade: #31283d;
+  --c-floor: #4a3a3f;
+  --c-floor-line: #3f3136;
+  --c-grass: #34473f;
+  --c-grass-dark: #2a3a33;
+  --c-path: #3b3243;
+  --c-window: #f2c86e;
+  --c-glass-glow: #f6d68b;
+  --c-paper: #f4e6c8;
+  --c-ink: #3b2a20;
+  --c-ink-muted: #6e5848;
+  --c-screen-off: #2a2433;
+  --c-screen-on: #9fe0c3;
+  --c-plant: #6f9a68;
+  --c-pot: #a8664c;
+  --c-mug: #d8d2cc;
+  --c-board: #4c5c45;
+  --c-cobweb: #e9dcc4;
+
+  --c-roof-1: #96566a;
+  --c-roof-2: #567a63;
+  --c-roof-3: #4f6890;
+  --c-roof-4: #a07c3a;
+  --c-roof-5: #6c5a91;
+  --c-roof-6: #94603f;
 }
