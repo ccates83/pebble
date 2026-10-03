@@ -1,10 +1,14 @@
 /*
- * The office floor: HQ drawn as a little town of buildings on a lawn.
+ * The office floor: HQ drawn as 16-bit rooms seen from a 3/4 top-down view.
  *
- * Every colour is a token from tokens.css. The only values that come from data
- * are classes (a tint index, a roof index, a pose) — nothing here is set
- * inline. Animation is CSS only, and every animated pose has a static pose that
- * means the same thing under prefers-reduced-motion.
+ * Every colour is a token from tokens.css. Sprites are pixel grids whose
+ * cells carry a palette class (`px-o`, `px-c`…); the classes are mapped to
+ * tokens here, which is how the night theme, the department tints and the
+ * per-room floors reach the art. The only values that come from data are
+ * classes (a tint, a floor, a pose) and custom properties carrying positions
+ * in art pixels (`--x`, `--y`, `--w`, `--h`, `--t`, `--z`, `--room-w`,
+ * `--room-h`). Motion is CSS only, and under prefers-reduced-motion every
+ * animated pose has a still frame that means the same thing.
  */
 
 /* ---- header: one quiet line ------------------------------------------- */
@@ -52,7 +56,7 @@
 
 .floor {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 18.5rem;
+  grid-template-columns: minmax(0, 1fr) 19rem;
   gap: var(--sp-5);
   align-items: start;
 }
@@ -66,75 +70,46 @@
   top: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--sp-5);
   max-height: calc(100vh - 2 * var(--sp-4));
   overflow-y: auto;
-  /* Room for the notice board's shadow and the focus ring. */
-  padding: 0 0.25rem 0.5rem;
+  /* Room for the pixel frames and drop shadows, which sit outside the box. */
+  padding: var(--bw) calc(var(--bw) * 3) calc(var(--bw) * 3) var(--bw);
 }
 
-/* ---- the map: a lawn with a path ------------------------------------- */
+/* ---- the map: a lawn, rooms packed into columns ----------------------- */
 
 .map {
+  --frame: var(--c-frame);
   background:
-    radial-gradient(circle at 20% 30%, var(--c-grass-dark) 0 1.4px, transparent 1.8px) 0 0 / 26px 22px,
-    radial-gradient(circle at 70% 75%, var(--c-grass-dark) 0 1.2px, transparent 1.6px) 0 0 / 34px 30px,
-    var(--c-grass);
-  border: 3px solid var(--c-grass-dark);
-  border-radius: var(--radius-lg);
+    conic-gradient(from 270deg at 3px 3px, var(--c-map-dot) 25%, transparent 0) 0 0 / 20px 16px,
+    conic-gradient(from 270deg at 3px 3px, var(--c-map-dot) 25%, transparent 0) 10px 8px / 20px 16px,
+    var(--c-map);
   padding: var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
 }
 
-.map__plaza {
+.map__rooms {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-4);
-  align-items: flex-end;
+  gap: 16px;
+  align-items: flex-start;
 }
 
-.map__plaza > .bldg--hq {
-  flex: 2 1 24rem;
-}
-
-.map__plaza > .bldg--tooling {
-  flex: 1 1 13rem;
-  max-width: 24rem;
-}
-
-/* A sandy path runs between the plaza and the street. Buildings stand on the
-   street bottom-aligned, each as wide as its rooms need. */
-.map__street {
+.map__col {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-4);
-  align-items: flex-end;
-  padding-top: calc(var(--sp-4) + 0.6rem);
-  background: linear-gradient(var(--c-path), var(--c-path)) 0 0 / 100% 0.85rem no-repeat;
+  flex-direction: column;
+  gap: 24px;
 }
 
-.map__street > .bldg {
-  flex: 2 1 13rem;
-  max-width: 26rem;
-}
-
-.map__street > .bldg--cols-3 {
-  flex: 3 1 19rem;
-  max-width: 36rem;
-}
-
-.map__street > .bldg--cols-4 {
-  flex: 4 1 25rem;
-  max-width: 46rem;
-}
-
-.map__empty {
-  background: var(--c-surface);
-  border-radius: var(--radius);
-  padding: var(--sp-3);
-  color: var(--c-text-muted);
+.map__empty,
+.map__foot-note {
+  background: var(--c-paper);
+  color: var(--c-ink-muted);
+  padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-small);
   margin: 0;
   max-width: none;
@@ -143,632 +118,394 @@
 .map__foot {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
 }
 
-.map__foot .faint {
-  background: var(--c-surface);
-  border-radius: var(--radius-pill);
-  padding: 0 var(--sp-2);
+.map__foot-note {
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  text-transform: uppercase;
 }
 
-/* ---- buildings --------------------------------------------------------- */
+/* ---- a room ------------------------------------------------------------ */
 
-.roof-1 { --roof: var(--c-roof-1); }
-.roof-2 { --roof: var(--c-roof-2); }
-.roof-3 { --roof: var(--c-roof-3); }
-.roof-4 { --roof: var(--c-roof-4); }
-.roof-5 { --roof: var(--c-roof-5); }
-.roof-6 { --roof: var(--c-roof-6); }
-
-.bldg {
+.room {
+  margin: 0;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  filter: drop-shadow(0 4px 0 var(--c-shadow));
 }
 
-.bldg__top {
+/*
+ * The scene is a container, so its children can size themselves in art
+ * pixels: one --px is the room's rendered width over its width in art
+ * pixels. Every room has the same art width, so every room has the same
+ * pixel scale.
+ */
+.scene {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  padding: 1rem 2.4rem 0.6rem;
-  min-height: 3.6rem;
+  width: 100%;
+  aspect-ratio: var(--room-w) / var(--room-h);
+  container-type: inline-size;
+  --px: calc(100cqw / var(--room-w));
+  box-shadow: 5px 5px 0 0 var(--c-shadow);
 }
 
-/* The roof: scalloped shingles in a gentle mansard. */
-.bldg__top::before {
-  content: '';
+.scene__art {
   position: absolute;
   inset: 0;
-  z-index: 0;
-  background:
-    radial-gradient(circle at 50% 0, transparent 0 6px, color-mix(in srgb, var(--roof) 72%, var(--c-ink)) 6px 7.5px, transparent 8px) 0 0 / 16px 10px,
-    var(--roof);
-  clip-path: polygon(0 100%, 4.5% 0, 95.5% 0, 100% 100%);
-  border-radius: 6px 6px 0 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.bldg__top > * {
-  position: relative;
-  z-index: 1;
+.cast {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.bldg__sign {
-  background: var(--c-wood);
-  color: var(--c-on-wood);
-  border: 2px solid var(--c-wood-dark);
-  border-radius: var(--radius);
-  padding: 0.15rem 0.9rem 0.25rem;
+.scene__ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.scene__ui > * {
+  pointer-events: auto;
+}
+
+/* Placed by art-pixel coordinates handed over as custom properties. */
+.at {
+  position: absolute;
+  left: calc(var(--x) * var(--px));
+  top: calc(var(--y) * var(--px));
+}
+
+.at--box {
+  width: calc(var(--w) * var(--px));
+  height: calc(var(--h) * var(--px));
+}
+
+.room__note {
+  margin: var(--sp-2) 0 0;
+  max-width: none;
+  background: var(--c-paper);
+  color: var(--c-ink-muted);
+  font-size: var(--fs-small);
+  padding: var(--sp-1) var(--sp-2);
+  box-shadow: 3px 3px 0 0 var(--c-shadow);
+}
+
+/* The room's sign: a wooden plaque on the back wall. Selected is a paper
+   plaque with a dashed outline, not just a colour. */
+.room__sign {
+  translate: -50% 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  box-shadow: 0 3px 0 var(--c-wood-dark);
-  max-width: 100%;
-  transition: transform var(--dur) var(--ease);
-}
-
-.bldg__sign:hover {
-  transform: translateY(-1px);
-}
-
-.bldg__sign[aria-pressed='true'] {
-  background: var(--c-paper);
-  color: var(--c-ink);
-  outline: 3px dashed var(--c-accent);
-  outline-offset: 3px;
-}
-
-.bldg__name {
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  font-weight: 600;
-  line-height: 1.15;
+  max-width: calc((var(--room-w) - 104) * var(--px));
+  padding: 3px 8px 4px;
+  border: 0;
+  background: var(--c-wood);
+  color: var(--c-on-wood);
+  box-shadow:
+    0 -2px 0 0 var(--px-ink),
+    0 2px 0 0 var(--px-ink),
+    -2px 0 0 0 var(--px-ink),
+    2px 0 0 0 var(--px-ink),
+    3px 4px 0 0 var(--px-shade);
+  line-height: 1.1;
   text-align: center;
 }
 
-.bldg__sub {
-  font-size: var(--fs-micro);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  opacity: 0.88;
+.room__sign:hover {
+  background: var(--c-wood-light);
 }
 
-/* Drift: a cobweb in the roof's corner. */
-.bldg__top > .mk--drift {
-  position: absolute;
-  left: 4.5%;
-  top: 0;
-  width: 2.6rem;
-  height: 2.6rem;
-  z-index: 2;
-}
-
-.bldg__construction {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
+.room__sign[aria-pressed='true'] {
   background: var(--c-paper);
   color: var(--c-ink);
-  border-radius: var(--radius-pill);
-  padding: 0.05rem 0.5rem 0.05rem 0.2rem;
-  font-size: var(--fs-micro);
-  font-weight: 800;
+  outline: 2px dashed var(--c-accent-ink);
+  outline-offset: 4px;
 }
 
-/* Scaffolding over the roof while the charter is unfilled. */
-.bldg--scaffold .bldg__top::after {
-  content: '';
-  position: absolute;
-  inset: 0.15rem 1.4rem 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 2.4rem, var(--c-wood-dark) 2.4rem calc(2.4rem + 3px)),
-    linear-gradient(transparent 0 calc(50% - 1.5px), var(--c-wood-dark) calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px));
-  opacity: 0.6;
-}
-
-.bldg__body {
-  background: var(--c-wall);
-  border: 3px solid var(--c-wood-dark);
-  border-top-width: 4px;
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  padding: var(--sp-3) var(--sp-3) 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  overflow: hidden;
-}
-
-.bldg__rooms {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
-  gap: var(--sp-2);
-}
-
-.bldg--cols-2 .bldg__rooms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.bldg--cols-3 .bldg__rooms { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.bldg--cols-4 .bldg__rooms { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-
-.bldg__desks,
-.lobby__desks {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-  gap: var(--sp-2);
-}
-
-.bldg__empty {
-  margin: 0;
-  max-width: none;
-  padding: var(--sp-3);
-  border: 2px dashed var(--c-rule-strong);
-  border-radius: var(--radius);
-  color: var(--c-text-muted);
-  font-size: var(--fs-small);
-  background: var(--c-wall-shade);
-}
-
-/* Archived: boarded up, desaturated, still inspectable from its sign. */
-.bldg--boarded .bldg__top::before {
-  filter: saturate(0.25) brightness(0.92);
-}
-
-.bldg__boards {
-  min-height: 6rem;
-  border-radius: var(--radius);
-  background:
-    linear-gradient(-9deg, transparent 0 22%, var(--c-wood) 22% 34%, transparent 34% 62%, var(--c-wood) 62% 74%, transparent 74%),
-    repeating-linear-gradient(90deg, var(--c-wall-shade) 0 1.4rem, var(--c-rule) 1.4rem calc(1.4rem + 2px));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--sp-3);
-}
-
-.bldg__boards-text {
-  background: var(--c-paper);
-  color: var(--c-ink);
-  border: 1.5px solid var(--c-wood-dark);
-  border-radius: 4px;
-  padding: 0.1rem 0.6rem;
-  font-size: var(--fs-small);
-  font-weight: 700;
-  transform: rotate(-2deg);
-}
-
-/* ---- rooms and desks --------------------------------------------------- */
-
-.room {
-  position: relative;
-  container-type: inline-size;
-  font: inherit;
-  text-align: left;
-  color: var(--c-text);
-  padding: 0;
-  border: 2px solid var(--c-wood-dark);
-  border-radius: 12px;
-  background: repeating-linear-gradient(90deg, var(--c-floor) 0 1.1rem, var(--c-floor-line) 1.1rem calc(1.1rem + 1.5px));
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-}
-
-.room:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 3px 0 var(--c-shadow);
-}
-
-.room[aria-pressed='true'] {
-  outline: 3px dashed var(--c-accent);
-  outline-offset: 2px;
-  transform: translateY(-2px);
-}
-
-.room--desk {
-  background: repeating-linear-gradient(90deg, var(--c-floor) 0 1.1rem, var(--c-floor-line) 1.1rem calc(1.1rem + 1.5px));
-  padding-top: 0.4rem;
-}
-
-/* A room someone is waiting in gets a thicker frame, not just a colour. */
-.room--waiting {
-  border-width: 3px;
-  border-color: var(--c-signal);
-}
-
-.room--vacant {
-  background: var(--c-surface-sunk);
-}
-
-.room__wall {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.25rem;
-  padding: 0.35rem 0.4rem 0.45rem;
-  min-height: 2.2rem;
-  min-width: 0;
-  background: var(--c-wall-shade);
-  /* The scene's empty top overlaps the wall a little, like a back wall. */
-  margin-bottom: -0.1rem;
-}
-
-.room__plate {
-  background: var(--c-paper);
-  color: var(--c-ink);
-  border: 1.5px solid var(--c-wood);
-  border-radius: 5px;
-  padding: 0 0.4rem;
+.room__name {
   font-family: var(--font-display);
   font-weight: 600;
-  /* Shrinks with the room so a long word ("Engineering") fits whole; longer
-     names wrap at spaces, never mid-word. */
-  font-size: clamp(0.62rem, (100cqi - 1.5rem) / 6.4, 0.8rem);
-  min-width: 0;
-  line-height: 1.2;
-  padding-block: 0.08rem;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
 }
 
-.room__pins {
+.room__sub {
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.room__crack {
   position: absolute;
-  top: 2.1rem;
-  right: 0.25rem;
-  z-index: 1;
+  right: -10px;
+  top: -8px;
+}
+
+.room__board,
+.room__calendar,
+.room__web {
   display: flex;
   gap: 2px;
 }
 
-.room__pins--float {
-  top: 0.3rem;
+.room__board {
+  translate: -50% 0;
 }
 
-.room__pins .mk {
-  width: 1.2rem;
-  height: 1.2rem;
+/* "Charter unfilled", hung on the hazard tape across the back wall. */
+.room__tape {
+  translate: -50% -50%;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
 }
 
-.room__scene {
+.room__tape-text {
+  background: var(--c-paper);
+  color: var(--c-ink);
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  box-shadow: 0 0 0 1px var(--px-ink);
+}
+
+.room__door {
+  display: flex;
+  gap: 2px;
+}
+
+/* The mailbox by the door: the flag is up when there is mail. */
+.mailbox {
+  width: calc(14 * var(--px));
+  height: calc(16 * var(--px));
+}
+
+.mailbox__art {
+  display: block;
   width: 100%;
-  height: 5.6rem;
-  margin-top: auto;
+  height: 100%;
 }
 
-.room__caption {
-  background: var(--c-surface);
-  border-top: 2px solid var(--c-wood-dark);
-  padding: 0.2rem 0.45rem 0.3rem;
+.mailbox__n {
+  position: absolute;
+  left: 70%;
+  top: -6px;
+  min-width: 14px;
+  padding: 0 2px;
+  background: var(--c-paper);
+  color: var(--c-ink);
+  box-shadow: 0 0 0 1px var(--px-ink);
+  font: 700 var(--fs-pixel) / 12px var(--font-pixel);
+  text-align: center;
+}
+
+/* ---- workstations -------------------------------------------------------- */
+
+.station {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: center;
+}
+
+button.station:hover {
+  outline: 2px dashed var(--c-rule-strong);
+  outline-offset: -1px;
+}
+
+button.station[aria-pressed='true'] {
+  outline: 2px dashed var(--c-accent);
+  outline-offset: 0;
+}
+
+/* A selected desk also gets a menu cursor above it: a shape, not a colour. */
+button.station[aria-pressed='true']::before {
+  content: '▼';
+  position: absolute;
+  left: 50%;
+  top: calc(-9 * var(--px));
+  translate: -50% 0;
+  color: var(--c-accent);
+  font-size: 12px;
+  line-height: 1;
+  text-shadow: 1px 1px 0 var(--c-paper);
+  animation: px-hop 0.9s steps(2) infinite;
+}
+
+.station__pins {
+  position: absolute;
+  right: calc(1 * var(--px));
+  top: calc(-3 * var(--px));
+  display: flex;
+  gap: 1px;
+}
+
+/* Nameplate and status on one paper card in front of the chair. Paper keeps
+   its ink at night, so the words never lose contrast. */
+.station__labels {
+  position: absolute;
+  left: calc(1 * var(--px));
+  right: calc(1 * var(--px));
+  top: calc(43 * var(--px));
   display: flex;
   flex-direction: column;
-  font-size: var(--fs-micro);
-  line-height: 1.35;
-  min-width: 0;
-  flex: 1;
+  align-items: stretch;
+  gap: 1px;
+  padding: 2px 2px 3px;
+  background: var(--c-paper);
+  color: var(--c-ink);
+  box-shadow: 0 0 0 1px var(--px-ink), 2px 2px 0 0 var(--px-shade);
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.room__status {
-  font-weight: 800;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: var(--c-text-muted);
-}
-
-/* A shape for each status, matching the status dots elsewhere. */
-.room__status::before {
-  content: '';
-  flex: none;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  border: 1.5px dashed currentcolor;
-}
-
-.room__status--active {
-  color: var(--c-live);
-}
-
-.room__status--active::before {
-  background: currentcolor;
-  border-style: solid;
-}
-
-.room__status--waiting {
-  color: var(--c-signal);
-}
-
-.room__status--waiting::before {
-  background: currentcolor;
-  border-style: solid;
-  border-radius: 1px;
-  transform: rotate(45deg);
-}
-
-.room__status--idle::before {
-  border-style: solid;
-}
-
-.room__status--vacant::before {
-  border-radius: 1px;
-  border-style: solid;
-}
-
-.room__doing {
-  color: var(--c-text-faint);
+.station__plate,
+.station__status {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.room__flag {
-  color: var(--c-signal);
+.station__plate {
   font-weight: 700;
 }
 
-.room--cracked .room__wall {
-  background: linear-gradient(var(--c-fault-wash), var(--c-fault-wash));
-}
-
-/* ---- the lobby: door, mailbox, anyone without a room -------------------- */
-
-.lobby {
+.station__status {
   display: flex;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-  margin: 0 calc(-1 * var(--sp-3));
-  padding: 0.5rem var(--sp-3) 0;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 1.6rem, var(--c-rule) 1.6rem calc(1.6rem + 1px)),
-    var(--c-wall-shade);
-  border-top: 3px solid var(--c-wood-dark);
-  min-height: 3.9rem;
-}
-
-.lobby__door {
-  position: relative;
-  flex: none;
-  width: 3.1rem;
-  height: 3.4rem;
-  background:
-    linear-gradient(90deg, transparent 0 calc(50% - 1px), var(--c-wood-dark) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
-    var(--c-wood);
-  border: 2px solid var(--c-wood-dark);
-  border-bottom: 0;
-  border-radius: 1.35rem 1.35rem 0 0;
-}
-
-.lobby__door::after {
-  content: '';
-  position: absolute;
-  right: 0.35rem;
-  top: 55%;
-  width: 0.3rem;
-  height: 0.3rem;
-  border-radius: 50%;
-  background: var(--c-glass-glow);
-}
-
-.lobby__notes {
-  position: absolute;
-  inset: 0.45rem 0 auto;
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 3px;
+  color: var(--c-ink-muted);
 }
 
-.lobby__notes .mk {
-  width: 1.3rem;
-  height: 1.3rem;
-  margin: -1px;
-}
-
-.lobby__mailbox {
-  position: relative;
+/* A shape for each status, matching the status dots elsewhere. */
+.station__status::before {
+  content: '';
   flex: none;
-  width: 1.6rem;
-  height: 2.9rem;
-  order: -1;
+  width: 5px;
+  height: 5px;
+  border: 1px dashed currentcolor;
 }
 
-/* Box on a post. */
-.lobby__mailbox::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1.25rem;
-  background: var(--c-roof-3);
-  border: 2px solid var(--c-wood-dark);
-  border-radius: 0.8rem 0.8rem 3px 3px;
+.station__status--active {
+  color: var(--c-live-ink);
 }
 
-.lobby__mailbox::after {
-  content: '';
-  position: absolute;
-  left: calc(50% - 2px);
-  top: 1.2rem;
-  bottom: 0;
-  width: 4px;
-  background: var(--c-wood-dark);
+.station__status--active::before {
+  background: currentcolor;
+  border-style: solid;
 }
 
-/* The flag is down when empty and up when there is mail: a shape, not a colour. */
-.lobby__flag {
-  position: absolute;
-  right: -0.35rem;
-  top: 0.6rem;
-  width: 0.55rem;
-  height: 0.2rem;
-  background: var(--c-wood-dark);
-  transform-origin: left center;
-  z-index: 1;
-}
-
-.lobby__mailbox--full .lobby__flag {
-  top: 0.15rem;
-  width: 0.2rem;
-  height: 0.75rem;
-  right: -0.2rem;
-  background: var(--c-fault);
-  box-shadow: 0.2rem 0 0 var(--c-fault);
-}
-
-.lobby__mail-n {
-  position: absolute;
-  inset: 0.15rem 0 auto;
-  text-align: center;
-  font-size: var(--fs-micro);
-  font-weight: 800;
-  color: var(--c-paper);
-  z-index: 1;
-}
-
-.lobby__label {
-  align-self: center;
-  font-size: var(--fs-micro);
+.station__status--waiting {
+  color: var(--c-signal-ink);
   font-weight: 700;
-  color: var(--c-text-faint);
-  letter-spacing: 0.04em;
 }
 
-.lobby__desks {
-  flex: 1 1 18rem;
-  padding-bottom: var(--sp-2);
+.station__status--waiting::before {
+  background: currentcolor;
+  border-style: solid;
+  transform: rotate(45deg);
 }
 
-/* ---- markers ----------------------------------------------------------- */
-
-.mk {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  width: 1.4rem;
-  height: 1.4rem;
+.station__status--idle::before {
+  border-style: solid;
 }
 
-.mk svg {
+.station__status--vacant {
+  color: var(--c-fault-ink);
+}
+
+.station__status--vacant::before {
+  border: 0;
+  width: auto;
+  height: auto;
+  content: '×';
+}
+
+.station--free .station__labels {
+  opacity: 0.72;
+}
+
+.station--unlisted .station__plate::after {
+  content: ' ?';
+  color: var(--c-signal-ink);
+}
+
+.room--boarded .station__labels {
+  opacity: 0.6;
+}
+
+/* ---- characters -------------------------------------------------------- */
+
+.walker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(12 * var(--px));
+  height: calc(20 * var(--px));
+  translate: calc((var(--x) - 6) * var(--px)) calc((var(--y) - 20) * var(--px));
+  transition: translate calc(var(--t, 0) * 1ms) linear;
+  z-index: var(--z);
+}
+
+.walker--seated {
+  width: calc(24 * var(--px));
+  height: calc(36 * var(--px));
+  translate: calc((var(--x) - 12) * var(--px)) calc((var(--y) - 36) * var(--px));
+}
+
+.walker > svg {
+  display: block;
   width: 100%;
   height: 100%;
-  overflow: visible;
 }
 
-.mk__n {
-  position: absolute;
-  right: -5px;
-  bottom: -4px;
-  min-width: 0.95rem;
-  height: 0.95rem;
-  padding: 0 2px;
-  border-radius: var(--radius-pill);
-  background: var(--c-ink);
-  color: var(--c-paper);
-  font-size: 0.6rem;
-  font-weight: 800;
-  line-height: 0.95rem;
-  text-align: center;
+.walker--left > svg {
+  scale: -1 1;
 }
 
-.mk-paper,
-.mk-note {
-  fill: var(--c-paper);
-  stroke: var(--c-ink);
-  stroke-width: 1.2;
+.spr-walk--4 .spr-sheet {
+  animation: px-sheet-4 0.62s steps(4) infinite;
 }
 
-.mk-line {
-  fill: none;
-  stroke: var(--c-ink);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.spr-walk--2 .spr-sheet {
+  animation: px-sheet-2 0.36s steps(2) infinite;
 }
 
-.mk-line-fill {
-  fill: var(--c-ink);
+.spr-sheet--type {
+  animation: px-sheet-2 0.46s steps(2) infinite;
 }
 
-.mk-seal,
-.mk-pin {
-  fill: var(--c-accent-ink);
+.spr-bubble {
+  animation: px-blink 1.1s steps(1) infinite;
 }
 
-.mk-bubble {
-  fill: var(--c-paper);
-  stroke: var(--c-signal-ink);
-  stroke-width: 1.6;
+.spr-z {
+  animation: px-drift 2.6s steps(5) infinite;
 }
 
-.mk-glyph {
-  fill: var(--c-signal-ink);
-  font: 800 11px var(--font-body);
+.spr-z--2 {
+  animation-delay: -1.3s;
 }
 
-.mk-cloud {
-  fill: var(--c-mug);
-  stroke: var(--c-ink);
-  stroke-width: 1.1;
-}
-
-.mk-bolt {
-  fill: none;
-  stroke: var(--c-fault-ink);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.mk-web {
-  fill: none;
-  stroke: var(--c-cobweb);
-  stroke-width: 1.1;
-}
-
-.mk-sticky {
-  fill: var(--tint-4);
-  stroke: var(--c-ink);
-  stroke-width: 0.9;
-}
-
-.mk-bulb {
-  fill: var(--c-glass-glow);
-  stroke: var(--c-ink);
-  stroke-width: 1;
-}
-
-.mk-leg {
-  stroke: var(--c-wood-dark);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.mk-hazard {
-  fill: var(--tint-4);
-  stroke: var(--c-ink);
-  stroke-width: 1.1;
-}
-
-.mk-stripe {
-  stroke: var(--c-ink);
-  stroke-width: 1.5;
-}
-
-.mk-cal-top {
-  fill: var(--c-fault-ink);
-}
-
-.mk-crack {
-  fill: none;
-  stroke: var(--c-ink);
-  stroke-width: 1.8;
-  stroke-linejoin: round;
-}
-
-/* ---- sprites ----------------------------------------------------------- */
+/* ---- the palette: sprite cells to tokens -------------------------------- */
 
 .tint-1 { --shirt: var(--tint-1); }
 .tint-2 { --shirt: var(--tint-2); }
@@ -793,192 +530,217 @@
 .hair-4 { --hair: var(--c-hair-4); }
 .hair-5 { --hair: var(--c-hair-5); }
 
-.spr {
-  display: block;
-  overflow: visible;
+.fl-1 { --fa: var(--px-floor-1a); --fb: var(--px-floor-1b); }
+.fl-2 { --fa: var(--px-floor-2a); --fb: var(--px-floor-2b); }
+.fl-3 { --fa: var(--px-floor-3a); --fb: var(--px-floor-3b); }
+.fl-4 { --fa: var(--px-floor-4a); --fb: var(--px-floor-4b); }
+.fl-5 { --fa: var(--px-floor-5a); --fb: var(--px-floor-5b); }
+
+.px-o,
+.px-e,
+.px-z { fill: var(--px-ink); }
+.px-s { fill: var(--skin, var(--c-skin-1)); }
+.px-h { fill: var(--hair, var(--c-hair-1)); }
+.px-r { fill: var(--px-blush); }
+.px-w { fill: var(--px-white); }
+.px-c { fill: var(--shirt, var(--tint-worker)); }
+.px-C { fill: color-mix(in srgb, var(--shirt, var(--tint-worker)) 70%, var(--px-ink)); }
+.px-p { fill: var(--px-pants); }
+.px-f { fill: var(--px-shoe); }
+.px-k { fill: var(--px-chair); }
+.px-K { fill: var(--px-chair-dark); }
+.px-d { fill: var(--px-desk-top); }
+.px-D { fill: var(--px-desk); }
+.px-L { fill: var(--px-desk-dark); }
+.px-m { fill: var(--px-crt); }
+.px-M { fill: var(--px-crt-dark); }
+.px-n { fill: var(--screen, var(--px-screen-off)); }
+.px-g { fill: var(--px-code); }
+.px-b { fill: var(--px-key); }
+.px-t { fill: var(--px-paper); }
+.px-T { fill: var(--px-paper-dark); }
+.px-u { fill: var(--px-mug); }
+.px-l { fill: var(--px-leaf); }
+.px-v { fill: var(--px-leaf-dark); }
+.px-q { fill: var(--px-pot); }
+.px-a { fill: var(--px-water); }
+.px-i { fill: var(--px-glow); }
+.px-G { fill: var(--px-metal); }
+.px-R { fill: var(--px-red); }
+.px-B { fill: var(--px-mailbox); }
+.px-x { fill: var(--px-hazard); }
+.px-y { fill: var(--px-cork); }
+.px-shade { fill: var(--px-shade); }
+.px-steam { fill: var(--px-white); }
+.px-led { fill: var(--px-screen-on); }
+.px-glint { fill: var(--px-white); opacity: 0.35; }
+.px-floor { fill: var(--px-floor-1a); }
+.px-fa { fill: var(--fa, var(--px-floor-1a)); }
+.px-fb { fill: var(--fb, var(--px-floor-1b)); }
+.px-fl { fill: color-mix(in srgb, var(--fb, var(--px-floor-1b)) 82%, var(--px-ink)); }
+.px-wall { fill: var(--px-wall); }
+.px-wall-low { fill: var(--px-wall-low); }
+.px-wall-top { fill: var(--px-wall-top); }
+.px-wall-trim { fill: var(--px-wall-trim); }
+.px-sky { fill: var(--px-sky); }
+.px-star { fill: var(--px-star); }
+.px-rug { fill: var(--px-rug); }
+.px-rug-edge { fill: var(--px-rug-edge); }
+.px-boarded { fill: var(--px-ink); opacity: 0.45; }
+
+/* What a monitor shows follows whoever is in the chair. */
+.st-art--active,
+.st-art--waiting { --screen: var(--px-screen-on); }
+.st-art--idle { --screen: var(--px-screen-dim); }
+.st-art--waiting .px-z { fill: var(--c-signal-ink); }
+.st-sign .px-z { fill: var(--c-fault-ink); }
+.spr-bubble .px-z { fill: var(--c-signal-ink); }
+.spr-bubble .px-t { fill: var(--c-paper); }
+
+/* ---- ambient life ------------------------------------------------------- */
+
+.st-art--active .st-screen {
+  animation: px-flicker 4.2s steps(1) infinite;
 }
 
-.spr-shadow { fill: var(--c-shadow); }
-.spr-chair { fill: var(--c-wood-dark); }
-.spr-chair-shade { fill: var(--c-wood); }
-.spr-shirt { fill: var(--shirt); }
-.spr-arm { stroke: color-mix(in srgb, var(--shirt) 65%, var(--c-ink)); stroke-width: 0.6; }
-.spr-collar { fill: var(--c-paper); opacity: 0.85; }
-.spr-skin { fill: var(--skin); }
-.spr-hair { fill: var(--hair); }
-.spr-eye { fill: var(--c-ink); }
-.spr-lid { fill: none; stroke: var(--c-ink); stroke-width: 1.1; stroke-linecap: round; }
-.spr-cheek { fill: var(--c-cheek); opacity: 0.55; }
-.spr-metal { fill: var(--c-text-faint); }
-.spr-monitor { fill: var(--c-ink); }
-.spr-screen { fill: var(--c-screen-off); }
-.spr--active .spr-screen,
-.spr--waiting .spr-screen { fill: var(--c-screen-on); }
-.spr-code-line { fill: var(--c-live-ink); }
-.spr-screen-q { fill: var(--c-signal-ink); font: 800 8px var(--font-body); }
-.spr-desk-top { fill: var(--c-wood-light); }
-.spr-desk { fill: var(--c-wood); }
-.spr-desk-drawer { fill: var(--c-wood-light); stroke: var(--c-wood-dark); stroke-width: 0.6; }
-.spr-mug { fill: var(--c-mug); stroke: var(--c-ink); stroke-width: 0.5; }
-.spr-mug-handle { fill: none; stroke: var(--c-mug); stroke-width: 1.3; }
-.spr-steam { fill: none; stroke: var(--c-text-faint); stroke-width: 0.8; stroke-linecap: round; }
-.spr-pot { fill: var(--c-pot); }
-.spr-leaf { fill: var(--c-plant); }
-.spr-leaf--2 { fill: color-mix(in srgb, var(--c-plant) 80%, var(--c-ink)); }
-.spr-bubble-bg { fill: var(--c-paper); stroke: var(--c-signal-ink); stroke-width: 1.6; }
-.spr-bubble-text { fill: var(--c-signal-ink); font: 800 12px var(--font-body); }
-.spr-z { fill: var(--c-text-muted); font: 600 9px var(--font-display); }
-.spr-z--2 { font-size: 12px; }
-.spr-box { fill: var(--c-wood-light); stroke: var(--c-wood-dark); stroke-width: 0.8; }
-.spr-tape { stroke: var(--c-wood-dark); stroke-width: 1.2; }
-.spr-string { stroke: var(--c-wood-dark); stroke-width: 0.9; }
-.spr-sign { fill: var(--c-paper); stroke: var(--c-wood-dark); stroke-width: 1.4; }
-.spr-sign-text { fill: var(--c-fault-ink); font: 600 7.5px var(--font-display); letter-spacing: 0.06em; }
-.spr-dust { fill: var(--c-text-faint); opacity: 0.45; }
-
-/* Poses. Every moving part has a static meaning: typing arms, a bubble, "zz". */
-.spr-head,
-.spr-body,
-.spr-arm-l,
-.spr-arm-r,
-.spr-bubble,
-.spr-z,
-.spr-code-line,
-.spr-steam {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
+.st-cursor {
+  animation: px-blink 1s steps(1) infinite;
 }
 
-.spr--idle .spr-head {
-  transform: rotate(-9deg) translateY(0.6px);
+.st-art--active .px-steam {
+  animation: px-blink 1.6s steps(1) infinite;
 }
 
-.spr--active .spr-head {
-  animation: spr-bob 1.8s ease-in-out infinite;
+.plant__leaves {
+  animation: px-sway 9s steps(1) infinite;
 }
 
-.spr--active .spr-arm-l {
-  animation: spr-type 0.46s steps(2, jump-none) infinite;
+.plant--late .plant__leaves {
+  animation-delay: -4.5s;
 }
 
-.spr--active .spr-arm-r {
-  animation: spr-type 0.46s steps(2, jump-none) infinite 0.23s;
+.cooler__bubble {
+  animation: px-bubble 7s steps(1) infinite;
 }
 
-.spr--active .spr-code-line {
-  transform-origin: 0 50%;
-  animation: spr-code 2.6s steps(5, jump-none) infinite;
+@keyframes px-sheet-4 {
+  to { transform: translateX(-48px); }
 }
 
-.spr--active .spr-code-line--2 {
-  animation-delay: 0.5s;
+@keyframes px-sheet-2 {
+  to { transform: translateX(-24px); }
 }
 
-.spr--active .spr-code-line--3 {
-  animation-delay: 1.1s;
+@keyframes px-blink {
+  50% { opacity: 0; }
 }
 
-.spr--active .spr-steam {
-  animation: spr-steam 3s ease-in-out infinite;
+@keyframes px-hop {
+  50% { translate: -50% -2px; }
 }
 
-.spr--waiting .spr-bubble {
-  transform-origin: 30% 100%;
-  animation: spr-pulse 1.8s ease-in-out infinite;
+@keyframes px-drift {
+  from { transform: translate(0, 0); opacity: 1; }
+  to { transform: translate(3px, -10px); opacity: 0; }
 }
 
-.spr--idle .spr-z {
-  animation: spr-float 3.4s ease-in-out infinite;
+@keyframes px-flicker {
+  0%, 100% { opacity: 1; }
+  91% { opacity: 0.82; }
+  93% { opacity: 1; }
+  95% { opacity: 0.9; }
 }
 
-.spr--idle .spr-z--2 {
-  animation-delay: 1.7s;
+@keyframes px-sway {
+  0%, 84%, 100% { transform: translateX(0); }
+  86% { transform: translateX(1px); }
+  90% { transform: translateX(0); }
+  92% { transform: translateX(-1px); }
 }
 
-@keyframes spr-bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-0.9px);
-  }
+@keyframes px-bubble {
+  0%, 80% { opacity: 0; transform: translateY(0); }
+  82% { opacity: 1; transform: translateY(0); }
+  86% { opacity: 1; transform: translateY(-1px); }
+  90% { opacity: 1; transform: translateY(-2px); }
+  94% { opacity: 1; transform: translateY(-3px); }
+  98%, 100% { opacity: 0; transform: translateY(-3px); }
 }
 
-@keyframes spr-type {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-1.4px);
-  }
-}
-
-@keyframes spr-code {
-  0% {
-    transform: scaleX(0.2);
-  }
-  100% {
-    transform: scaleX(1);
-  }
-}
-
-@keyframes spr-steam {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 0.8;
-    transform: translateY(-1.5px);
-  }
-}
-
-@keyframes spr-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.14);
-  }
-}
-
-@keyframes spr-float {
-  0% {
-    opacity: 0;
-    transform: translate(0, 1px);
-  }
-  30% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translate(3px, -5px);
-  }
-}
-
+/* Reduced motion: nobody walks (the view seats them directly), and every
+   loop stops on a frame that still says the same thing. */
 @media (prefers-reduced-motion: reduce) {
-  .spr *,
-  .spr {
+  .scene *,
+  .portrait *,
+  button.station[aria-pressed='true']::before {
     animation: none !important;
   }
+
+  .walker {
+    transition: none;
+  }
+
+  .spr-z--2 {
+    display: none;
+  }
+
+  .cooler__bubble {
+    opacity: 0;
+  }
 }
 
-/* ---- inspector --------------------------------------------------------- */
+/* ---- markers ----------------------------------------------------------- */
+
+.mk {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.scene .mk {
+  width: calc(11 * var(--px));
+  height: calc(11 * var(--px));
+}
+
+.mk svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mk__n {
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  min-width: 13px;
+  height: 12px;
+  padding: 0 2px;
+  background: var(--px-ink);
+  color: var(--c-paper);
+  font: 700 var(--fs-pixel) / 12px var(--font-pixel);
+  text-align: center;
+}
+
+.mk--waiting-session .px-z,
+.mk--org-issue .px-z { fill: var(--c-signal-ink); }
+.mk--drift .px-w { fill: var(--c-ink-muted); }
+.mk .px-t { fill: var(--c-paper); }
+
+/* ---- inspector: a status window ---------------------------------------- */
 
 .inspector {
+  --frame: var(--c-frame);
   background: var(--c-surface);
-  border: 3px solid var(--c-wood);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  padding: 0 0 var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  box-shadow: 0 3px 0 var(--c-wood-dark);
   font-size: var(--fs-small);
+}
+
+.inspector > :not(.inspector__head) {
+  margin-inline: var(--sp-3);
 }
 
 .inspector__head {
@@ -986,8 +748,10 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: var(--sp-2);
-  padding-bottom: var(--sp-2);
-  border-bottom: 2px dashed var(--c-rule);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--c-wood);
+  color: var(--c-on-wood);
+  box-shadow: inset 0 -3px 0 0 var(--c-wood-dark);
 }
 
 .inspector__titles {
@@ -997,23 +761,29 @@
 }
 
 .inspector__kicker {
-  font-size: var(--fs-micro);
-  font-weight: 800;
-  letter-spacing: 0.05em;
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
   text-transform: uppercase;
-  color: var(--c-text-faint);
+  opacity: 0.9;
 }
 
 .inspector__title {
   font-size: 1.2rem;
+  color: var(--c-on-wood);
   overflow-wrap: anywhere;
+}
+
+.inspector__head .btn {
+  --frame: var(--c-wood-dark);
+  background: var(--c-paper);
+  color: var(--c-ink);
 }
 
 .inspector-hint {
   margin: 0;
   padding: var(--sp-3);
+  background: var(--c-surface);
   border: 2px dashed var(--c-rule-strong);
-  border-radius: var(--radius-lg);
   color: var(--c-text-muted);
   font-size: var(--fs-small);
   text-align: center;
@@ -1021,7 +791,7 @@
 
 .ins-portrait {
   display: grid;
-  grid-template-columns: 7rem minmax(0, 1fr);
+  grid-template-columns: 6.5rem minmax(0, 1fr);
   gap: var(--sp-3);
   align-items: center;
 }
@@ -1037,14 +807,14 @@
 }
 
 .ins-portrait__scene {
+  display: block;
   width: 100%;
   height: auto;
-  padding: 0.6rem 0.2rem 0.1rem;
-  border-radius: var(--radius);
-  border: 2px solid var(--c-wood-dark);
-  background:
-    linear-gradient(var(--c-wall-shade), var(--c-wall-shade)) 0 0 / 100% 40% no-repeat,
-    repeating-linear-gradient(90deg, var(--c-floor) 0 0.9rem, var(--c-floor-line) 0.9rem calc(0.9rem + 1.5px));
+  box-shadow:
+    0 -2px 0 0 var(--px-ink),
+    0 2px 0 0 var(--px-ink),
+    -2px 0 0 0 var(--px-ink),
+    2px 0 0 0 var(--px-ink);
 }
 
 .ins-block {
@@ -1055,12 +825,12 @@
 }
 
 .ins-block__label {
-  font-family: var(--font-body);
-  font-size: var(--fs-micro);
-  font-weight: 800;
-  letter-spacing: 0.05em;
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  font-weight: 700;
   text-transform: uppercase;
   color: var(--c-text-faint);
+  letter-spacing: 0.02em;
 }
 
 .ins-block p {
@@ -1154,19 +924,22 @@
   font-weight: 700;
 }
 
-/* ---- notice board ------------------------------------------------------ */
+/* ---- notice board: a quest log ----------------------------------------- */
 
 .board {
+  --frame: var(--c-wood-dark);
   background:
-    radial-gradient(circle at 30% 40%, color-mix(in srgb, var(--c-board) 80%, var(--c-ink)) 0 1px, transparent 1.5px) 0 0 / 9px 9px,
-    var(--c-board);
-  border: 5px solid var(--c-wood);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-3);
-  box-shadow: 0 3px 0 var(--c-wood-dark), inset 0 0 0 1px var(--c-wood-dark);
+    repeating-linear-gradient(180deg, transparent 0 23px, color-mix(in srgb, var(--c-ink-muted) 14%, transparent) 23px 24px),
+    var(--c-paper);
+  color: var(--c-ink);
+  padding: 0 0 var(--sp-3);
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+}
+
+.board > :not(.board__head) {
+  margin-inline: var(--sp-3);
 }
 
 .board__head {
@@ -1175,6 +948,9 @@
   justify-content: space-between;
   gap: var(--sp-2);
   flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--c-wood);
+  box-shadow: inset 0 -3px 0 0 var(--c-wood-dark);
 }
 
 .board__head h2 {
@@ -1185,18 +961,17 @@
 .board__count {
   background: var(--c-paper);
   color: var(--c-ink);
-  border-radius: var(--radius-pill);
-  padding: 0 0.55rem;
-  font-size: var(--fs-micro);
-  font-weight: 800;
+  padding: 1px 6px;
+  box-shadow: 0 0 0 2px var(--c-wood-dark);
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .board__empty {
   margin: 0;
-  background: var(--c-paper);
   color: var(--c-ink-muted);
-  border-radius: 4px;
-  padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-small);
 }
 
@@ -1206,64 +981,48 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
 }
 
+/* Each slip is one quest: an icon, where it is, and what it asks. */
 .slip {
   position: relative;
-  background: var(--c-paper);
   color: var(--c-ink);
-  border-radius: 3px;
-  padding: 0.5rem 0.6rem 0.45rem;
+  padding: var(--sp-2) 0;
   display: grid;
   grid-template-columns: 1.4rem minmax(0, 1fr);
   gap: var(--sp-2);
   align-items: start;
-  box-shadow: 0 2px 0 var(--c-shadow);
+  border-bottom: 2px dashed color-mix(in srgb, var(--c-ink-muted) 35%, transparent);
   font-size: var(--fs-small);
-  transform: rotate(-0.5deg);
 }
 
-.slip:nth-child(even) {
-  transform: rotate(0.45deg);
-}
-
-/* The pin holding it up. */
-.slip::before {
-  content: '';
-  position: absolute;
-  top: -4px;
-  left: calc(50% - 4px);
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--c-accent-ink);
-  box-shadow: 0 1px 0 var(--c-shadow);
+.slip:last-child {
+  border-bottom: 0;
 }
 
 .slip--here {
-  outline: 3px dashed var(--c-paper);
-  outline-offset: 3px;
+  outline: 2px dashed var(--c-accent-ink);
+  outline-offset: 2px;
 }
 
 .slip__body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 0.05rem;
+  gap: 0.1rem;
 }
 
 .slip__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0 var(--sp-2);
-  font-size: var(--fs-micro);
-  font-weight: 800;
-  letter-spacing: 0.03em;
+  font-family: var(--font-pixel);
+  font-size: var(--fs-pixel);
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .slip__level {
-  text-transform: uppercase;
   color: var(--c-ink-muted);
 }
 
@@ -1277,12 +1036,11 @@
 
 .slip--error .slip__level::before,
 .slip--warn .slip__level::before {
-  content: '⚑ ';
+  content: '! ';
 }
 
 .slip__where {
   color: var(--c-ink-muted);
-  font-weight: 700;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1336,18 +1094,18 @@ button.slip__title:hover {
 .board__foot {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
+  padding-top: var(--sp-1);
 }
 
 .board__foot .btn {
+  --frame: var(--c-wood-dark);
   background: var(--c-paper);
   color: var(--c-ink);
-  border-color: var(--c-wood-dark);
 }
 
 .board__foot .btn:hover:not(:disabled) {
   color: var(--c-accent-ink);
-  border-color: var(--c-accent-ink);
 }
 
 /* ---- between phone and wide: the side column drops below the map ---- */
@@ -1373,7 +1131,7 @@ button.slip__title:hover {
   .floor {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-4);
+    gap: var(--sp-5);
   }
 
   /* Notice board first, then the map, then whatever is being inspected. */
@@ -1400,47 +1158,9 @@ button.slip__title:hover {
 
   .map {
     padding: var(--sp-2);
-    gap: var(--sp-3);
   }
 
-  .map__plaza {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .map__plaza > .bldg--tooling,
-  .map__plaza > .bldg--hq {
-    flex: none;
-    max-width: none;
-  }
-
-  .map__street {
-    flex-direction: column;
-    align-items: stretch;
-    padding-top: calc(var(--sp-3) + 0.6rem);
-  }
-
-  .map__street > .bldg {
-    flex: none;
-    max-width: none;
-  }
-
-  .bldg__top {
-    padding-inline: 1.6rem;
-  }
-
-  .bldg__body {
-    padding: var(--sp-2) var(--sp-2) 0;
-  }
-
-  .lobby {
-    margin: 0 calc(-1 * var(--sp-2));
-    padding-inline: var(--sp-2);
-  }
-
-  .bldg .bldg__rooms,
-  .bldg__desks,
-  .lobby__desks {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .scene {
+    box-shadow: 3px 3px 0 0 var(--c-shadow);
   }
 }

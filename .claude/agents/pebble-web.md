@@ -16,10 +16,13 @@ that rather than reaching into `packages/core`.
 
 ## The rules that get broken most
 
-- **No inline styles.** Classes only. The sole exception is passing a magnitude to
-  CSS as a custom property, as `Bars` and `Meter` do.
+- **No inline styles.** Classes only. The sole exception is passing a magnitude or
+  position to CSS as a custom property, as `Bars`, `Meter` and the office map's
+  art-pixel coordinates (`--x`, `--y`, `--w`, `--h`, `--t`, `--z`) do. Never a
+  colour.
 - **No component hard-codes a colour.** Everything comes from `tokens.css`
-  (the cozy-sim palette, day and night; see `docs/DESIGN.md`).
+  (the warm 16-bit palette, day and night, with `--px-*` for sprite pixels; see
+  `docs/DESIGN.md`). Retro, never neon.
 - **Every table column sorts.** Use `DataTable`; omit `key` only for a genuinely
   display-only column.
 - **Cap rows**, with "show more" below.
@@ -28,12 +31,19 @@ that rather than reaching into `packages/core`.
 - **No hero metric cards.** Numbers go inline with `Stat`, where they are
   actionable.
 - **No glassmorphism, gradient text, or modals.** Inspect inline. Nesting is
-  allowed only where it *is* the information (town → building → room → desk).
-- **Fonts**: Fredoka for headings and signs, Nunito for body, JetBrains Mono for
+  allowed only where it *is* the information (floor → room → desk).
+- **Fonts**: Pixelify Sans for headings and signs, Silkscreen at 8px for map
+  nameplates and small labels, Nunito for dense text, JetBrains Mono for
   identifiers. Never a system default.
-- **Status is never colour alone** — every sprite state has a pose and a caption.
-  Sprites are hand-built inline SVG; animate with CSS and respect
-  `prefers-reduced-motion`.
+- **Pixel art**: sprites are string grids in `components/sprites.tsx`, rendered
+  as SVG rects with `crispEdges` and one `px-*` class per cell. Frames animate
+  with CSS `steps()`, movement with transitions on `--x`/`--y`. No image
+  assets, no smooth vector art.
+- **Motion is honest**: a character walks in or out only when a data read
+  changed (the map diffs reads); the first-load entrance is the one exception.
+  Under `prefers-reduced-motion` nobody walks and loops stop on a still frame.
+- **Status is never colour alone** — every desk state has a pose, a shape and a
+  caption in words.
 - **Tabular numerals** on anything in a column.
 - **Never render fabricated data.** An empty state says what would fill it.
 

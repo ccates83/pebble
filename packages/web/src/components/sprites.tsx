@@ -1,16 +1,36 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 
 /*
- * The office map's sprites: hand-drawn inline SVG, no image assets, no library.
+ * The office's pixel art: hand-drawn grids in code, no image assets, nothing
+ * fetched, no library.
  *
- * No sprite sets a colour. Every shape carries a class, and office.css maps the
- * class to a token — so the night theme, the department tints and the reduced-
- * motion poses all live in the stylesheet. Sprites are decoration: each one is
- * aria-hidden, and whatever renders it must say the same thing in words.
+ * A sprite is an array of equal-length strings, one character per pixel. `.`
+ * is transparent; every other character is a palette slot, rendered as an SVG
+ * <rect> with the class `px-<char>`. office.css maps each class to a token
+ * (`--px-*`, a skin or hair tone, or the wearer's department tint), so no
+ * sprite sets a colour and the night theme is a stylesheet concern. Runs of
+ * one colour on a row become one rect, and every SVG here renders with
+ * `shape-rendering: crispEdges`.
+ *
+ * Sprites are decoration: each one is aria-hidden, and whatever renders it
+ * says the same thing in words.
+ *
+ * Palette:
+ *   o outline   e eye      s skin     h hair     r blush    w white
+ *   c shirt     C shirt shade         p trousers f shoes
+ *   k chair     K chair shade         d desk top D desk front L desk dark
+ *   m CRT case  M CRT shade           n screen   g code     b keys
+ *   t paper     T paper shade         u mug      l leaf     v leaf shade
+ *   q pot       a water    i glow     G metal    R red      B mailbox
+ *   x hazard    y cork     z sign ink
  */
 
-/** What a desk shows. `empty` is a desk with nobody at it; `vacant` has no agent at all. */
+export type Grid = readonly string[];
+
+/** What a workstation shows. `empty` is a desk with nobody at it; `vacant` has no agent at all. */
 export type Pose = 'active' | 'waiting' | 'idle' | 'empty' | 'vacant';
+export type SeatedPose = 'active' | 'waiting' | 'idle';
+export type Facing = 'up' | 'down' | 'side';
 
 /** A small, stable hash so a character keeps its look across reloads. */
 export function hashOf(text: string): number {
@@ -22,163 +42,438 @@ export function hashOf(text: string): number {
   return hash >>> 0;
 }
 
-function Hair(props: { variant: number }): ReactNode {
-  const cap = <path className="spr-hair" d="M30.6 26.5c-.6-6.4 3.6-10.6 9.4-10.6s10 4.2 9.4 10.6c-2.4-2.6-5.6-3.9-9.4-3.9s-7 1.3-9.4 3.9z" />;
-  switch (props.variant % 4) {
-    case 1:
-      return (
-        <>
-          {cap}
-          <circle className="spr-hair" cx="40" cy="15.2" r="3.6" />
-        </>
-      );
-    case 2:
-      return (
-        <>
-          {cap}
-          <rect className="spr-hair" x="29.6" y="23" width="3.4" height="10" rx="1.7" />
-          <rect className="spr-hair" x="47" y="23" width="3.4" height="10" rx="1.7" />
-        </>
-      );
-    case 3:
-      return <path className="spr-hair" d="M30.4 27c-1.2-7 3.4-11.4 9.6-11.4 6 0 10.6 4.2 9.6 10.6-1.6-1.4-3.2-2.2-5-2.6-.6 1.2-2 2-4.2 2-2.6 0-5-1-6.4-2.6-1.6.8-2.8 2.2-3.6 4z" />;
-    default:
-      return cap;
-  }
+/** A grid as rects, one per horizontal run of a colour. */
+export function Pixels(props: { grid: Grid; x?: number; y?: number; className?: string }): ReactNode {
+  const { grid, x = 0, y = 0 } = props;
+  const rects: ReactElement[] = [];
+  grid.forEach((row, ry) => {
+    let start = 0;
+    for (let rx = 1; rx <= row.length; rx += 1) {
+      if (rx < row.length && row[rx] === row[start]) continue;
+      const slot = row[start];
+      if (slot !== '.' && slot !== undefined) {
+        rects.push(<rect key={`${ry}-${start}`} className={`px-${slot}`} x={x + start} y={y + ry} width={rx - start} height={1} />);
+      }
+      start = rx;
+    }
+  });
+  return props.className ? <g className={props.className}>{rects}</g> : <>{rects}</>;
 }
 
-function Character(props: { pose: 'active' | 'waiting' | 'idle'; look: number }): ReactNode {
-  const { pose, look } = props;
+/** Mirror a grid left to right. */
+function mirror(grid: Grid): Grid {
+  return grid.map((row) => [...row].reverse().join(''));
+}
+
+// ---------------------------------------------------------------------------
+// Characters: 12 pixels wide. A head (8 rows) on a body (12 rows standing).
+// Three hairstyles, three facings. Colour comes from classes on the wearer.
+// ---------------------------------------------------------------------------
+
+const HEADS: Record<Facing, readonly Grid[]> = {
+  down: [
+    ['...oooooo...', '..ohhhhhho..', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohssssssho.', '.osesssseso.', '.orssssssro.', '..osssssso..'],
+    ['...oooooo...', '..ohhhhhho..', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhsssshho.', '.ohesssseho.', '.ohrssssrho.', '.ohossssoho.'],
+    ['..oooooooo..', '.ohhhhhhhho.', 'ohhhhhhhhhho', 'ohhhhhhhhhho', 'ohssssssssho', '.osesssseso.', '.orssssssro.', '..osssssso..'],
+  ],
+  up: [
+    ['...oooooo...', '..ohhhhhho..', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhhhhho.', '.oshhhhhhso.', '..ohhhhhho..'],
+    ['...oooooo...', '..ohhhhhho..', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhhhhho.'],
+    ['..oooooooo..', '.ohhhhhhhho.', 'ohhhhhhhhhho', 'ohhhhhhhhhho', 'ohhhhhhhhhho', '.ohhhhhhhho.', '.oshhhhhhso.', '..ohhhhhho..'],
+  ],
+  side: [
+    ['...oooooo...', '..ohhhhhho..', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhsssso.', '.ohhsssseso.', '.ohsssssrso.', '..osssssso..'],
+    ['...oooooo...', '..ohhhhhho..', '.ohhhhhhhho.', '.ohhhhhhhho.', '.ohhhhsssso.', '.ohhhssseso.', '.ohhhssssro.', '.ohhhosssso.'],
+    ['..oooooooo..', '.ohhhhhhhho.', 'ohhhhhhhhhho', 'ohhhhhhhhhho', 'ohhhhhsssso.', '.ohhsssseso.', '.ohsssssrso.', '..osssssso..'],
+  ],
+};
+
+function head(facing: Facing, style: number): Grid {
+  const heads = HEADS[facing];
+  return heads[style % heads.length] ?? heads[0] ?? [];
+}
+
+const TORSO_FRONT: Grid = ['..occwwcco..', '.occcccccco.', '.occcccccco.', '.oCccccccCo.', '.osCccccCso.', '..oppppppo..', '..oppppppo..'];
+const TORSO_BACK: Grid = ['..occcccco..', '.occcccccco.', '.occcccccco.', '.oCccccccCo.', '.osCccccCso.', '..oppppppo..', '..oppppppo..'];
+const TORSO_SIDE: Grid = ['...occcco...', '...occccco..', '...occccco..', '...oCCccco..', '...oCsccco..', '...oppppo...', '...oppppo...'];
+
+const LEGS_STAND: Grid = ['..oppooppo..', '..oppooppo..', '..oppooppo..', '..offooffo..', '..ooo..ooo..'];
+const LEGS_STEP_L: Grid = ['..oppooppo..', '..oppooffo..', '..oppo.ooo..', '..offo......', '..oooo......'];
+const LEGS_STEP_R: Grid = mirror(LEGS_STEP_L);
+const LEGS_SIDE_STAND: Grid = ['...oppppo...', '...oppppo...', '...oppppo...', '...offfffo..', '...ooooooo..'];
+const LEGS_SIDE_STRIDE: Grid = ['..oppoppo...', '.oppo.oppo..', '.opo...opo..', 'offo...offo.', 'oooo...oooo.'];
+
+/** The office chair from behind, as drawn at an empty desk and over a seated back. */
+const CHAIR_BACK: Grid = [
+  'oooooooooooo',
+  'okkkkkkkkkko',
+  'okKKKKKKKKko',
+  'okKKKKKKKKko',
+  'okKKKKKKKKko',
+  'okkkkkkkkkko',
+  'oooooooooooo',
+  '.....oo.....',
+  '..oooooooo..',
+  '..o.o..o.o..',
+];
+
+function standing(facing: Facing, style: number, legs: Grid): Grid {
+  const torso = facing === 'down' ? TORSO_FRONT : facing === 'up' ? TORSO_BACK : TORSO_SIDE;
+  return [...head(facing, style), ...torso, ...legs];
+}
+
+/** Walk cycles, as frames laid side by side: four for front and back, two for the side. */
+function walkFrames(facing: Facing, style: number): Grid[] {
+  if (facing === 'side') return [standing('side', style, LEGS_SIDE_STRIDE), standing('side', style, LEGS_SIDE_STAND)];
+  return [
+    standing(facing, style, LEGS_STEP_L),
+    standing(facing, style, LEGS_STAND),
+    standing(facing, style, LEGS_STEP_R),
+    standing(facing, style, LEGS_STAND),
+  ];
+}
+
+const TYPING_TORSO: Grid = ['..occcccco..', 'socccccccco.', '.occcccccco.', '.oCccccccCos', '.occcccccco.', '.occcccccco.'];
+
+/** Seated, 12 x 24: the back of a typist, a slumped sleeper, or someone turned round to face you. */
+function seatedFrames(pose: SeatedPose, style: number): Grid[] {
+  if (pose === 'active') {
+    const frame = [...head('up', style), ...TYPING_TORSO, ...CHAIR_BACK];
+    return [frame, mirror(frame)];
+  }
+  if (pose === 'idle') {
+    const blank = '............';
+    return [[blank, blank, ...head('up', style), '.occcccccco.', '.oCccccccCo.', '.oCccccccCo.', '.osCccccCso.', ...CHAIR_BACK]];
+  }
+  // Waiting: turned round in the chair, hands in lap, facing the viewer.
+  return [
+    [
+      ...head('down', style),
+      '..occwwcco..',
+      'koccccccccok',
+      'koccccccccok',
+      'koCccccccCok',
+      'kosCccccCsok',
+      'kooppppppook',
+      'oKoppppppoKo',
+      'oKoppooppoKo',
+      'oKoffooffoKo',
+      'oooooooooooo',
+      '.....oo.....',
+      '..oooooooo..',
+      '..o.o..o.o..',
+      '............',
+      '............',
+      '............',
+    ],
+  ];
+}
+
+// Rendered sheets are cached: every character with the same hairstyle shares
+// them, and colour comes from the wearer's classes.
+const sheetCache = new Map<string, ReactNode>();
+
+function sheet(key: string, frames: () => Grid[], width: number): ReactNode {
+  const cached = sheetCache.get(key);
+  if (cached) return cached;
+  const made = frames().map((grid, index) => <Pixels key={index} grid={grid} x={index * width} />);
+  sheetCache.set(key, made);
+  return made;
+}
+
+/** A character walking: a strip of frames that CSS steps through. */
+export function WalkSprite(props: { facing: Facing; style: number }): ReactNode {
+  const count = props.facing === 'side' ? 2 : 4;
   return (
-    <g className="spr-who">
-      <g className="spr-body">
-        <rect className="spr-shirt" x="29.5" y="33" width="21" height="16" rx="7.5" />
-        <path className="spr-collar" d="M36.5 33.4l3.5 3.4 3.5-3.4z" />
-      </g>
-      <g className="spr-head">
-        <circle className="spr-skin" cx="40" cy="26" r="8.6" />
-        <Hair variant={look >> 3} />
-        {pose === 'idle' ? (
-          <path className="spr-lid" d="M35 27.6q1.5 1.2 3 0M42 27.6q1.5 1.2 3 0" />
-        ) : (
-          <>
-            <circle className="spr-eye" cx="36.6" cy="27.2" r="1.15" />
-            <circle className="spr-eye" cx="43.4" cy="27.2" r="1.15" />
-          </>
-        )}
-        <circle className="spr-cheek" cx="34.4" cy="30" r="1.6" />
-        <circle className="spr-cheek" cx="45.6" cy="30" r="1.6" />
-        {pose === 'waiting' && <ellipse className="spr-eye" cx="40" cy="31.4" rx="0.9" ry="1.1" />}
-      </g>
-      {pose === 'idle' ? (
-        <rect className="spr-shirt spr-arm" x="31.5" y="41.2" width="17" height="4.4" rx="2.2" />
-      ) : (
-        <>
-          <g className="spr-arm-l">
-            <rect className="spr-shirt spr-arm" x="30.5" y="40.6" width="7" height="4.4" rx="2.2" />
-            <circle className="spr-skin" cx="37.4" cy="43" r="1.8" />
-          </g>
-          <g className="spr-arm-r">
-            <rect className="spr-shirt spr-arm" x="42.5" y="40.6" width="7" height="4.4" rx="2.2" />
-            <circle className="spr-skin" cx="42.6" cy="43" r="1.8" />
-          </g>
-        </>
-      )}
-    </g>
+    <svg className={`spr-walk spr-walk--${count}`} viewBox="0 0 12 20" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      <g className="spr-sheet">{sheet(`walk-${props.facing}-${props.style % 3}`, () => walkFrames(props.facing, props.style), 12)}</g>
+    </svg>
   );
 }
 
-/**
- * One desk and whoever sits at it.
- *
- * `tint` picks the shirt (a department's colour, or the generic worker's), and
- * `look` varies skin, hair colour and hairstyle so a row of desks is a row of
- * people rather than one clone. Neither carries meaning.
- */
-export function DeskScene(props: { pose: Pose; tint: number | 'worker'; look: number; className?: string }): ReactNode {
-  const { pose, look } = props;
-  const tint = props.tint === 'worker' ? 'tint-worker' : `tint-${props.tint}`;
-  const classes = ['spr', `spr--${pose}`, tint, `skin-${(look % 4) + 1}`, `hair-${((look >> 2) % 5) + 1}`, props.className]
-    .filter(Boolean)
-    .join(' ');
-
-  if (pose === 'vacant') {
-    return (
-      <svg className={classes} viewBox="0 0 80 60" aria-hidden="true" focusable="false">
-        <ellipse className="spr-shadow" cx="40" cy="56.5" rx="30" ry="2.6" />
-        <rect className="spr-box" x="8" y="40" width="16" height="14" rx="1.5" />
-        <rect className="spr-box spr-box--top" x="11" y="29" width="12" height="11" rx="1.5" />
-        <path className="spr-tape" d="M16 40v14M17 29v11" />
-        <path className="spr-string" d="M33 4l-4 16M47 4l4 16" />
-        <rect className="spr-sign" x="23" y="18" width="34" height="14" rx="3" />
-        <text className="spr-sign-text" x="40" y="27.8" textAnchor="middle">
-          VACANT
-        </text>
-        <circle className="spr-dust" cx="62" cy="53" r="2.2" />
-        <circle className="spr-dust" cx="66" cy="54" r="1.4" />
-      </svg>
-    );
-  }
-
-  const seated = pose === 'active' || pose === 'waiting' || pose === 'idle';
+/** A character standing still, for the beat between rising from a chair and walking off. */
+export function StandSprite(props: { facing: Facing; style: number }): ReactNode {
   return (
-    <svg className={classes} viewBox="0 0 80 60" aria-hidden="true" focusable="false">
-      <ellipse className="spr-shadow" cx="40" cy="56.5" rx="31" ry="2.6" />
-      {/* Chair back, behind whoever sits in it. Pushed in when nobody does. */}
-      <rect className="spr-chair" x="29" y={seated ? 28 : 33} width="22" height="18" rx="5" />
-      <rect className="spr-chair-shade" x="32" y={seated ? 30 : 35} width="16" height="3" rx="1.5" />
-      {seated && <Character pose={pose} look={look} />}
+    <svg className="spr-stand" viewBox="0 0 12 20" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      {sheet(`stand-${props.facing}-${props.style % 3}`, () => [standing(props.facing, props.style, props.facing === 'side' ? LEGS_SIDE_STAND : LEGS_STAND)], 12)}
+    </svg>
+  );
+}
 
-      {/* Monitor on the left of the desk. */}
-      <rect className="spr-metal" x="18.6" y="39" width="2.8" height="6" />
-      <rect className="spr-monitor" x="11" y="29" width="18" height="12" rx="2.2" />
-      <rect className="spr-screen" x="12.6" y="30.6" width="14.8" height="8.8" rx="1.2" />
-      {pose === 'active' && (
-        <g className="spr-code">
-          <rect className="spr-code-line" x="14" y="32.2" width="8" height="1.4" rx="0.7" />
-          <rect className="spr-code-line spr-code-line--2" x="15.6" y="34.6" width="9" height="1.4" rx="0.7" />
-          <rect className="spr-code-line spr-code-line--3" x="14" y="37" width="6" height="1.4" rx="0.7" />
+// ---------------------------------------------------------------------------
+// Little glyphs: the "!" bubble, the drifting Z, the VACANT sign's letters
+// ---------------------------------------------------------------------------
+
+const BUBBLE: Grid = ['.ooooooo.', 'ottttttto', 'otttzttto', 'otttzttto', 'otttzttto', 'ottttttto', 'otttzttto', 'ottttttto', '.ootoooo.', '..oto....', '..oo.....'];
+const ZED: Grid = ['zzzz', '..z.', '.z..', 'zzzz'];
+
+/**
+ * A seated character: typing, turned round with a "!" over its head, or slumped
+ * asleep. The frame strip sits in its own 12 x 24 viewport so the bubble and
+ * the Zs can float outside it without the next frame showing.
+ */
+export function SeatedSprite(props: { pose: SeatedPose; style: number }): ReactNode {
+  const frames = props.pose === 'active' ? 2 : 1;
+  return (
+    <svg className={`spr-seat spr-seat--${props.pose}`} viewBox="-6 -12 24 36" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      <svg x={0} y={0} width={12} height={24} viewBox="0 0 12 24" overflow="hidden">
+        <g className={frames > 1 ? 'spr-sheet spr-sheet--type' : 'spr-sheet'}>
+          {sheet(`seat-${props.pose}-${props.style % 3}`, () => seatedFrames(props.pose, props.style), 12)}
         </g>
-      )}
-      {pose === 'waiting' && <text className="spr-screen-q" x="20" y="38" textAnchor="middle">?</text>}
-
-      {/* Desk. */}
-      <rect className="spr-desk-top" x="7" y="44.5" width="66" height="4.6" rx="2" />
-      <rect className="spr-desk" x="10" y="49" width="60" height="7" rx="1.5" />
-      <rect className="spr-desk-drawer" x="51" y="50.6" width="15" height="3.6" rx="1" />
-
-      {/* Mug and plant on the right. */}
-      <rect className="spr-mug" x="55" y="38.6" width="6" height="6" rx="1.2" />
-      <path className="spr-mug-handle" d="M61 40.2h1.2a1.6 1.6 0 010 3.2H61" />
-      {pose === 'active' && <path className="spr-steam" d="M57 36.6q-1-1.4 0-2.8t0-2.8M59.4 36.6q-1-1.4 0-2.8t0-2.8" />}
-      <rect className="spr-pot" x="64" y="39.4" width="7" height="5.2" rx="1.2" />
-      <ellipse className="spr-leaf" cx="65.6" cy="36.4" rx="2.2" ry="3.6" />
-      <ellipse className="spr-leaf spr-leaf--2" cx="69.4" cy="35.6" rx="2.2" ry="4" />
-
-      {pose === 'waiting' && (
-        <g className="spr-bubble">
-          <path className="spr-bubble-bg" d="M52 3h13a4 4 0 014 4v8a4 4 0 01-4 4h-7l-4 4v-4h-2a4 4 0 01-4-4V7a4 4 0 014-4z" />
-          <text className="spr-bubble-text" x="58.5" y="15.6" textAnchor="middle">
-            !
-          </text>
-        </g>
-      )}
-      {pose === 'idle' && (
+      </svg>
+      {props.pose === 'waiting' && <Pixels grid={BUBBLE} x={6} y={-12} className="spr-bubble" />}
+      {props.pose === 'idle' && (
         <g className="spr-zz">
-          <text className="spr-z spr-z--1" x="50" y="18">
-            z
-          </text>
-          <text className="spr-z spr-z--2" x="56" y="11">
-            z
-          </text>
+          <Pixels grid={ZED} x={12} y={-9} className="spr-z spr-z--1" />
+          <Pixels grid={ZED} x={12} y={-9} className="spr-z spr-z--2" />
         </g>
       )}
     </svg>
   );
 }
 
+// 3x5 letters (N is four wide) for signs drawn in pixels rather than type.
+const LETTERS: Record<string, Grid> = {
+  V: ['z.z', 'z.z', 'z.z', 'z.z', '.z.'],
+  A: ['.z.', 'z.z', 'zzz', 'z.z', 'z.z'],
+  C: ['.zz', 'z..', 'z..', 'z..', '.zz'],
+  N: ['z..z', 'zz.z', 'z.zz', 'z..z', 'z..z'],
+  T: ['zzz', '.z.', '.z.', '.z.', '.z.'],
+  '?': ['zz.', '..z', '.z.', '...', '.z.'],
+  '!': ['z', 'z', 'z', '.', 'z'],
+};
+
+function PixelWord(props: { word: string; x: number; y: number }): ReactNode {
+  let cursor = props.x;
+  return (
+    <>
+      {[...props.word].map((letter, index) => {
+        const grid = LETTERS[letter];
+        if (!grid) return null;
+        const at = cursor;
+        cursor += (grid[0]?.length ?? 3) + 1;
+        return <Pixels key={index} grid={grid} x={at} y={props.y} />;
+      })}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Markers: what an attention item looks like where it happened
+// A workstation: desk, CRT, keyboard and chair, 44 x 44, origin top-left.
+// The seated character is drawn separately, over the chair, so it can walk.
+// ---------------------------------------------------------------------------
+
+export const STATION_W = 44;
+export const STATION_H = 44;
+/** Where a seated sprite's 12 x 24 box sits within a station. */
+export const SEAT_X = 16;
+export const SEAT_Y = 16;
+
+function R(props: { x: number; y: number; w: number; h: number; c: string }): ReactNode {
+  return <rect className={`px-${props.c}`} x={props.x} y={props.y} width={props.w} height={props.h} />;
+}
+
+const MUG: Grid = ['oooo.', 'ouuoo', 'ouuoo', 'oooo.'];
+const PAPERS: Grid = ['ooooooo', 'ottttto', 'oTTTTTo', 'ottttto', 'ooooooo'];
+
+/**
+ * The furniture of one workstation. `screen` is what the CRT shows, which
+ * follows whoever is actually sitting there; `occupied` hides the empty chair
+ * because the seated sprite brings its own.
+ */
+export function StationArt(props: { x: number; y: number; screen: Pose; occupied: boolean }): ReactNode {
+  const { x, y, screen } = props;
+  if (screen === 'vacant') {
+    // A dust sheet over desk and monitor, and a sign: nobody has been hired.
+    return (
+      <g className="st-art st-art--vacant" transform={`translate(${x} ${y})`}>
+        <R x={3} y={33} w={38} h={2} c="shade" />
+        <R x={2} y={26} w={40} h={7} c="D" />
+        <R x={1} y={25} w={42} h={1} c="o" />
+        <R x={1} y={26} w={1} h={7} c="o" />
+        <R x={42} y={26} w={1} h={7} c="o" />
+        <R x={1} y={33} w={42} h={1} c="o" />
+        <R x={3} y={34} w={3} h={3} c="L" />
+        <R x={38} y={34} w={3} h={3} c="L" />
+        <Pixels
+          x={1}
+          y={2}
+          grid={[
+            '.............oooooooooo.....................',
+            '...........ootttttttttoo....................',
+            '..........otttttttttttTTo...................',
+            '..........otttttttttttTTo...................',
+            '..........ottttttttttttTo...................',
+            '..........ottttttttttttTo...................',
+            '..........ottttttttttttTo...................',
+            '..........ottttttttttttTo...................',
+            '..........ottttttttttttTo...................',
+            '..........otttttttttttttTo..................',
+            '.......ooootttttttttttttToooooo.............',
+            '....oootttttttttttttttttttttttTooooo........',
+            '..ootttttttttttttttttttttttttttttttTToo.....',
+            '.otttttttttttttttttttttttttttttttttttTTo....',
+            '.ottttttttttttttttttttttttttttttttttttTo....',
+            '.oTtttttttttttttttttttttttttttttttttttTo....',
+            '.oTTtttttTttttttttttTtttttttttttTtttTTTo....',
+            '.oTTTTtTTTTTtTTTTtTTTTtTTTTTTtTTTTTTTTo.....',
+            '..oooooooooooooooooooooooooooooooooooo......',
+          ]}
+        />
+        <g className="st-sign">
+          <R x={8} y={27} w={28} h={11} c="o" />
+          <R x={9} y={28} w={26} h={9} c="t" />
+          <PixelWord word="VACANT" x={10} y={30} />
+        </g>
+      </g>
+    );
+  }
+
+  return (
+    <g className={`st-art st-art--${screen}`} transform={`translate(${x} ${y})`}>
+      <R x={3} y={33} w={38} h={2} c="shade" />
+      {/* Desk: a top seen from above, a front face, two legs. */}
+      <R x={1} y={15} w={42} h={19} c="o" />
+      <R x={2} y={16} w={40} h={10} c="d" />
+      <R x={2} y={26} w={40} h={1} c="L" />
+      <R x={2} y={27} w={40} h={6} c="D" />
+      <R x={30} y={29} w={8} h={2} c="L" />
+      <R x={3} y={34} w={3} h={3} c="L" />
+      <R x={38} y={34} w={3} h={3} c="L" />
+      <Pixels grid={PAPERS} x={4} y={18} />
+      <Pixels grid={MUG} x={34} y={18} />
+      {screen === 'active' && <R x={35} y={16} w={1} h={1} c="steam" />}
+      {/* Keyboard on the desk, in front of the monitor. */}
+      <R x={15} y={22} w={14} h={3} c="o" />
+      <R x={16} y={23} w={12} h={1} c="b" />
+      {/* The CRT: a chunky case, a bezel and the screen. */}
+      <R x={13} y={2} w={18} h={18} c="o" />
+      <R x={14} y={3} w={16} h={16} c="m" />
+      <R x={14} y={17} w={16} h={2} c="M" />
+      <R x={15} y={4} w={14} h={11} c="M" />
+      <rect className="px-n st-screen" x={16} y={5} width={12} height={9} />
+      <R x={18} y={19} w={8} h={2} c="M" />
+      <R x={26} y={16} w={2} h={1} c={screen === 'empty' ? 'M' : 'led'} />
+      {screen === 'active' && (
+        <g className="st-code">
+          <R x={17} y={6} w={6} h={1} c="g" />
+          <R x={18} y={8} w={8} h={1} c="g" />
+          <R x={18} y={10} w={5} h={1} c="g" />
+          <rect className="px-g st-cursor" x={24} y={10} width={2} height={2} />
+        </g>
+      )}
+      {screen === 'waiting' && <PixelWord word="?" x={21} y={7} />}
+      {screen === 'idle' && <R x={21} y={9} w={2} h={1} c="g" />}
+      {screen === 'empty' && <R x={17} y={6} w={2} h={1} c="glint" />}
+      {!props.occupied && <Pixels grid={CHAIR_BACK} x={SEAT_X} y={SEAT_Y + 14} />}
+    </g>
+  );
+}
+
+/** A workstation with its occupant, for the inspector: no walking, one frame. */
+export function StationPortrait(props: { pose: Pose; tint: number | 'worker'; look: number; className?: string }): ReactNode {
+  const seated = props.pose === 'active' || props.pose === 'waiting' || props.pose === 'idle';
+  return (
+    <svg
+      className={['portrait', lookClasses(props.tint, props.look), props.className].filter(Boolean).join(' ')}
+      viewBox="-4 -14 52 62"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect className="px-floor" x={-4} y={-14} width={52} height={62} />
+      <StationArt x={0} y={0} screen={props.pose} occupied={seated} />
+      {seated && (
+        <g transform={`translate(${SEAT_X} ${SEAT_Y})`}>
+          <g className={`spr-seat spr-seat--${props.pose}`}>
+            <Pixels grid={seatedFrames(props.pose as SeatedPose, styleOf(props.look))[0] ?? []} />
+            {props.pose === 'waiting' && <Pixels grid={BUBBLE} x={6} y={-12} className="spr-bubble" />}
+            {props.pose === 'idle' && <Pixels grid={ZED} x={12} y={-9} className="spr-z" />}
+          </g>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/** Hairstyle from a look hash. */
+export function styleOf(look: number): number {
+  return (look >> 5) % 3;
+}
+
+/** Classes that dress a character: department shirt, skin and hair, from a stable hash. */
+export function lookClasses(tint: number | 'worker', look: number): string {
+  const shirt = tint === 'worker' ? 'tint-worker' : `tint-${tint}`;
+  return `${shirt} skin-${(look % 4) + 1} hair-${((look >> 2) % 5) + 1}`;
+}
+
+// ---------------------------------------------------------------------------
+// Decor
+// ---------------------------------------------------------------------------
+
+export const PLANT_LEAVES: Grid = [
+  '....vv....',
+  '..vvllv.v.',
+  '.vllllvvlv',
+  'vlllvlllv.',
+  '.vllvllllv',
+  '..vlllvlv.',
+  '...vllv...',
+];
+export const PLANT_POT: Grid = ['..oooooo..', '..oqqqqo..', '..oqqqqo..', '...oqqo...', '...oooo...'];
+
+export const COOLER: Grid = [
+  '..oooooo..',
+  '.oaaaaaao.',
+  '.oaiaaaao.',
+  '.oaaaaaao.',
+  '.oaaaaaao.',
+  '..oaaaao..',
+  '...oooo...',
+  '.oooooooo.',
+  '.owwwwwwo.',
+  '.owRwwawo.',
+  '.owwwwwwo.',
+  '.oGGGGGGo.',
+  '.owwwwwwo.',
+  '.owwwwwwo.',
+  '.owwwwwwo.',
+  '.oooooooo.',
+];
+
+/** A mailbox on a post. The flag is up when there is mail: a shape, not a colour. */
+export function MailboxArt(props: { full: boolean }): ReactNode {
+  return (
+    <svg className="mailbox__art" viewBox="0 0 14 16" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      <Pixels
+        grid={[
+          '.oooooooo.....',
+          'oBBBBBBBBo....',
+          'oBBBBBBBBo....',
+          'oBoooooBBo....',
+          'oBBBBBBBBo....',
+          'oBBBBBBBBo....',
+          'oooooooooo....',
+          '....oLLo......',
+          '....oLLo......',
+          '....oLLo......',
+          '....oLLo......',
+          '....oLLo......',
+          '....oLLo......',
+          '...oooooo.....',
+        ]}
+      />
+      {props.full ? (
+        <Pixels grid={['ooo.', 'oRRo', 'oRRo', 'oGo.', 'oGo.', 'oGo.', 'ooo.']} x={9} y={0} />
+      ) : (
+        <Pixels grid={['....', '....', '....', 'oooo', 'oGRo', 'oooo']} x={9} y={2} />
+      )}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Markers: what an attention item looks like where it happened, 12 x 12
 // ---------------------------------------------------------------------------
 
 export type MarkerKind =
@@ -193,93 +488,157 @@ export type MarkerKind =
   | 'org-issue'
   | 'missing';
 
-function MarkerArt(props: { kind: MarkerKind }): ReactNode {
-  switch (props.kind) {
-    case 'approval':
-      // A letter with a wax seal: something to sign.
-      return (
-        <>
-          <rect className="mk-paper" x="2.5" y="6" width="19" height="13" rx="2" />
-          <path className="mk-line" d="M3 7l9 6.5L21 7" />
-          <circle className="mk-seal" cx="12" cy="13.6" r="2.6" />
-        </>
-      );
-    case 'waiting-session':
-      return (
-        <>
-          <path className="mk-bubble" d="M5 3h14a3 3 0 013 3v8a3 3 0 01-3 3h-7l-4 4v-4H5a3 3 0 01-3-3V6a3 3 0 013-3z" />
-          <text className="mk-glyph" x="12" y="14.6" textAnchor="middle">
-            !
-          </text>
-        </>
-      );
-    case 'session-errors':
-      // A little rain cloud with a spark: something went wrong in a run.
-      return (
-        <>
-          <path className="mk-cloud" d="M6.5 15a4 4 0 01-.4-8 5.5 5.5 0 0110.6-1.2A4.2 4.2 0 0117.5 15z" />
-          <path className="mk-bolt" d="M12.5 13.5l-2.5 4h3l-2 4.5" />
-        </>
-      );
-    case 'drift':
-      // A cobweb in the corner: the structure has been left untended.
-      return (
-        <>
-          <path className="mk-web" d="M2 2l20 20M2 2l9 20M2 2l20 9M2 2v20M2 2h20" />
-          <path className="mk-web" d="M2 8q3.5.5 6-6M2 14q7 1 12-12M2 20q10 1.5 18-18" />
-        </>
-      );
-    case 'inbox':
-      // A note pinned to the door.
-      return (
-        <>
-          <rect className="mk-note" x="5" y="4" width="14" height="17" rx="1.2" transform="rotate(-6 12 12)" />
-          <path className="mk-line" d="M8 10.5h8M8 13.5h8M8 16.5h5" transform="rotate(-6 12 12)" />
-          <circle className="mk-pin" cx="12" cy="5" r="1.8" />
-        </>
-      );
-    case 'proposal':
-      // A pinned sticky with a lightbulb: an idea waiting for a decision.
-      return (
-        <>
-          <rect className="mk-sticky" x="4.5" y="4" width="15" height="16" rx="1.2" transform="rotate(5 12 12)" />
-          <circle className="mk-bulb" cx="12" cy="11.4" r="3.4" />
-          <rect className="mk-line-fill" x="10.4" y="14.6" width="3.2" height="2.4" rx="0.6" />
-          <circle className="mk-pin" cx="12" cy="5" r="1.8" />
-        </>
-      );
-    case 'charter':
-      // An A-frame "under construction" board.
-      return (
-        <>
-          <path className="mk-leg" d="M6 22L9.5 9M18 22L14.5 9" />
-          <rect className="mk-hazard" x="3" y="6" width="18" height="8" rx="1.2" />
-          <path className="mk-stripe" d="M6 6l-3 5M11 6l-5 8M16 6l-5 8M21 6l-5 8M21 11l-2 3" />
-        </>
-      );
-    case 'review-overdue':
-      // A calendar page.
-      return (
-        <>
-          <rect className="mk-paper" x="3.5" y="5" width="17" height="16" rx="2" />
-          <rect className="mk-cal-top" x="3.5" y="5" width="17" height="5" rx="2" />
-          <path className="mk-line" d="M8 3v4M16 3v4M7.5 14h3M13.5 14h3M7.5 17.5h3" />
-        </>
-      );
-    case 'missing':
-      // A crack in the wall: a folder or vault that should exist does not.
-      return <path className="mk-crack" d="M12 2l-2 5 4 3-3 4 3 3-2 5" />;
-    default:
-      return (
-        <>
-          <path className="mk-bubble" d="M12 3l10 17H2z" />
-          <text className="mk-glyph" x="12" y="18" textAnchor="middle">
-            !
-          </text>
-        </>
-      );
-  }
-}
+const MARKER_ART: Record<MarkerKind, Grid> = {
+  // A letter with a wax seal: something to sign.
+  approval: [
+    '............',
+    '............',
+    'oooooooooooo',
+    'oottttttttoo',
+    'otottttttoto',
+    'ottottttotto',
+    'otttoRRottto',
+    'ottttRRtttto',
+    'otttttttttto',
+    'oooooooooooo',
+    '............',
+    '............',
+  ],
+  // A speech bubble with a "!": an agent is waiting on a reply.
+  'waiting-session': [
+    '.oooooooooo.',
+    'otttttttttto',
+    'otttttztttto',
+    'otttttztttto',
+    'otttttztttto',
+    'otttttttttto',
+    'otttttztttto',
+    'otttttttttto',
+    '.ootooooooo.',
+    '..oto.......',
+    '..oo........',
+    '............',
+  ],
+  // A rain cloud with a spark: something went wrong in a run.
+  'session-errors': [
+    '....oooo....',
+    '..oouuuuoo..',
+    '.ouuuuuuuuo.',
+    'ouuuuuuuuuuo',
+    'ouuuuuuuuuuo',
+    '.oooooooooo.',
+    '.....RR.....',
+    '....RR......',
+    '...RRRR.....',
+    '.....RR.....',
+    '....RR......',
+    '............',
+  ],
+  // A cobweb in the corner: the structure has been left untended.
+  drift: [
+    'wwwwwwwwwwww',
+    'ww...w....w.',
+    'w.w..w...w..',
+    'w..wwwwww...',
+    'w..ww..w....',
+    'wwww.w.w....',
+    'w..w..ww....',
+    'w..w..w.....',
+    'w.w..w......',
+    'w.w.w.......',
+    'ww.w........',
+    'w...........',
+  ],
+  // A note pinned up: something unfiled.
+  inbox: [
+    '.....RR.....',
+    '..ooRRRRoo..',
+    '..ottRRtto..',
+    '..otttttto..',
+    '..ozzzzzto..',
+    '..otttttto..',
+    '..ozzzzzzo..',
+    '..otttttto..',
+    '..ozzzztto..',
+    '..otttttto..',
+    '..oooooooo..',
+    '............',
+  ],
+  // A sticky with a lightbulb: an idea waiting for a decision.
+  proposal: [
+    '.....RR.....',
+    '.ooooRRoooo.',
+    '.oxxxxxxxxo.',
+    '.oxxxooxxxo.',
+    '.oxxoiioxxo.',
+    '.oxxoiioxxo.',
+    '.oxxxooxxxo.',
+    '.oxxxooxxxo.',
+    '.oxxxxxxxxo.',
+    '.oooooooooo.',
+    '............',
+    '............',
+  ],
+  // An A-frame "under construction" board.
+  charter: [
+    '............',
+    'oooooooooooo',
+    'oxxzzxxzzxxo',
+    'oxzzxxzzxxzo',
+    'ozzxxzzxxzzo',
+    'oooooooooooo',
+    '..oL....Lo..',
+    '..oL....Lo..',
+    '.oL......Lo.',
+    '.oL......Lo.',
+    'oL........Lo',
+    'oo........oo',
+  ],
+  // A calendar page.
+  'review-overdue': [
+    '..o..o..o...',
+    '.ooooooooooo',
+    '.oRRRRRRRRRo',
+    '.oRRRRRRRRRo',
+    '.ooooooooooo',
+    '.ottttttttto',
+    '.otzztzzttto',
+    '.ottttttttto',
+    '.otzztzztzzo',
+    '.ottttttttto',
+    '.ooooooooooo',
+    '............',
+  ],
+  // A crack: a folder or vault that should exist does not.
+  missing: [
+    '.....oo.....',
+    '....oo......',
+    '....o.......',
+    '.....oo.....',
+    '......oo....',
+    '.....oo.....',
+    '....oo......',
+    '....o.......',
+    '.....o......',
+    '.....oo.....',
+    '......o.....',
+    '......o.....',
+  ],
+  'org-issue': [
+    '.....oo.....',
+    '....oxxo....',
+    '....oxxo....',
+    '...oxzzxo...',
+    '...oxzzxo...',
+    '..oxxzzxxo..',
+    '..oxxzzxxo..',
+    '.oxxxxxxxxo.',
+    '.oxxxzzxxxo.',
+    'oxxxxzzxxxxo',
+    'oooooooooooo',
+    '............',
+  ],
+};
 
 /**
  * A marker with its meaning in words: `role="img"` with an aria-label, and the
@@ -288,14 +647,9 @@ function MarkerArt(props: { kind: MarkerKind }): ReactNode {
 export function Marker(props: { kind: MarkerKind; label: string; count?: number; urgent?: boolean }): ReactNode {
   const count = props.count ?? 1;
   return (
-    <span
-      className={`mk mk--${props.kind}${props.urgent ? ' mk--urgent' : ''}`}
-      role="img"
-      aria-label={props.label}
-      title={props.label}
-    >
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <MarkerArt kind={props.kind} />
+    <span className={`mk mk--${props.kind}${props.urgent ? ' mk--urgent' : ''}`} role="img" aria-label={props.label} title={props.label}>
+      <svg viewBox="0 0 12 12" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+        <Pixels grid={MARKER_ART[props.kind]} />
       </svg>
       {count > 1 && <span className="mk__n">{count}</span>}
     </span>

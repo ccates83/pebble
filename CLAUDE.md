@@ -101,23 +101,38 @@ When updating it, load the `claude-api` skill rather than recalling rates.
 
 ### UI rules
 
-The dashboard is a cozy-sim "office floor": subsidiaries are buildings,
-departments are rooms, agents are sprites at desks. `docs/DESIGN.md` is the full
-version; the rules that get broken most often:
+The dashboard is a 16-bit pixel-art office: one room per unit (HQ, the tooling
+workshop, each subsidiary), a workstation with a nameplate per department, hot
+desks for sessions without one, and agents as characters who walk in at the
+door, sit down while their run is live, and walk out when it ends.
+`docs/DESIGN.md` is the full version; the rules that get broken most often:
 
-- **No inline styles.** Classes only. The two exceptions are `Bars` and `Meter`,
-  which pass a magnitude to CSS as a custom property — colour, radius and
-  easing still live in the stylesheet.
+- **No inline styles.** Classes only. The exceptions are custom properties
+  carrying a magnitude or position: `Bars` and `Meter`, and the map's art-pixel
+  coordinates (`--x`, `--y`, `--w`, `--h`, `--t`, `--z`, `--room-w`,
+  `--room-h`). Colour, radius and easing still live in the stylesheet.
+- **Pixel art stays pixel art.** Sprites are grids in code
+  (`components/sprites.tsx`) rendered as SVG rects with `crispEdges` and a
+  `px-*` palette class per cell. No image assets, no sprite library, no smooth
+  vector shapes. Don't drift back to rounded or illustrated art.
+- **Fonts:** Pixelify Sans for headings and signs, Silkscreen (8px only) for
+  map nameplates and small labels, Nunito for anything dense, JetBrains Mono
+  for identifiers.
+- **Motion is honest.** Characters arrive and leave only when the data changed
+  (the client diffs reads); the first-load entrance is the one exception,
+  because everyone in it really is live. Under `prefers-reduced-motion` nobody
+  walks and every loop stops on a still frame.
 - **Every table column sorts.** A column you cannot sort is a bug. Cap rows and
   offer "show more" instead of rendering hundreds.
 - **Filter pills, not dropdowns**, for small sets. Filters are visible state.
 - **No hero metric cards.** Numbers go inline where they are actionable.
 - **No glassmorphism, gradient text, or modals.** Inspect inline instead. The
-  map nests town → building → room → desk because that hierarchy is the data;
-  don't nest containers anywhere else.
-- **All colour lives in `styles/tokens.css`** (day and night palettes). No
-  component hard-codes a colour.
-- **Status is never colour alone.** Every agent state has a pose and a caption.
+  map nests floor → room → desk because that hierarchy is the data; don't nest
+  containers anywhere else.
+- **All colour lives in `styles/tokens.css`** (day and night palettes, `--px-*`
+  for sprite pixels). No component or sprite hard-codes a colour.
+- **Status is never colour alone.** Every agent state has a pose, a shape and a
+  caption in words.
 - **Never show fabricated or interpolated data.** If something could not be read,
   say so.
 

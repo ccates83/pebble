@@ -1,329 +1,46 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import type {
-  ApprovalRequest,
-  AttentionItem,
-  AttentionKind,
-  ChangelogEntry,
-  DepartmentActivity,
-  HqOverview,
-  HqUnit,
-  IssueLevel,
-  OrgDepartment,
-  OrgNote,
-  OrgPlacement,
-  OrgSnapshot,
-  SessionStatus,
-  SessionSummary,
-  Subsidiary,
-} from '@pebble/core';
+import type { AttentionItem, ChangelogEntry, HqOverview, IssueLevel, OrgDepartment, OrgNote, OrgSnapshot } from '@pebble/core';
 import { api } from '../lib/api.ts';
 import { useAsync, useClock, useSort } from '../lib/hooks.ts';
 import { dueLabel, duration, obsidianHref, relativeTime, relativeTo } from '../lib/format.ts';
 import { Badge, CostFigure, Empty, FilterPills, Meter, Money, Note, Section, StatusDot } from '../components/ui.tsx';
 import { DataTable, type Column } from '../components/DataTable.tsx';
-import { DeskScene, Marker, hashOf, type MarkerKind, type Pose } from '../components/sprites.tsx';
+import { Marker, StationPortrait, hashOf, type MarkerKind } from '../components/sprites.tsx';
+import { OfficeMap } from './HqMap.tsx';
+import {
+  DESK_POSE,
+  KIND_WORDS,
+  LEVEL_RANK,
+  buildFloor,
+  isArchived,
+  isPending,
+  isTime,
+  locate,
+  pinItems,
+  plural,
+  sameSelection,
+  sessionHref,
+  sessionKey,
+  type DeptModel,
+  type Pins,
+  type PlacedSession,
+  type Selection,
+  type UnitModel,
+} from './hqModel.ts';
 
 /*
- * HQ as an office floor.
+ * HQ as an office floor, drawn in 16-bit pixel art.
  *
- * Each subsidiary is a building, each department a room, and each room's agent
- * a character at a desk whose pose is its latest run's status. HQ is the head
- * office and tooling repos are workshops; their live sessions sit at desks as
- * generic workers. Attention items are drawn where they happened.
+ * One room per unit: the head office, the tooling workshop and each
+ * subsidiary. A subsidiary's departments have workstations with nameplates;
+ * live sessions without a department take hot desks. When the data shows an
+ * agent at work, its character walks in at the door and sits down; when the
+ * run ends, it walks out. Attention items are drawn where they happened.
  *
- * Everything on the map comes from /api/hq. A room with no runs shows an empty
- * desk, not a sleeping placeholder; a building with nobody in it says so.
+ * Everything on the map comes from /api/hq. A desk with nobody at it is empty,
+ * not a sleeping placeholder; a room with nobody in it says so.
  */
-
-type PlacedSession = SessionSummary & { placement: OrgPlacement };
-
-const LEVEL_RANK: Record<IssueLevel, number> = { error: 2, warn: 1, info: 0 };
-const TINTS = 12;
-const ROOFS = 6;
-
-/** Approval statuses are verbatim frontmatter, so compare loosely. */
-function isPending(approval: ApprovalRequest): boolean {
-  return (approval.status ?? '').trim().toLowerCase() === 'pending';
-}
-
-function isArchived(subsidiary: Subsidiary): boolean {
-  return subsidiary.status.trim().toLowerCase() === 'archived';
-}
-
-function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-function sessionHref(session: { adapter: string; id: string }): string {
-  return `#/session/${encodeURIComponent(session.adapter)}/${encodeURIComponent(session.id)}`;
-}
-
-/** `at` can carry an approval's free-text due ("before launch"); only a real time gets "3d ago". */
-function isTime(value: string | null): value is string {
-  return value !== null && Number.isFinite(Date.parse(value));
-}
-
-function sessionKey(session: { adapter: string; id: string }): string {
-  return `${session.adapter}:${session.id}`;
-}
-
-// ---------------------------------------------------------------------------
-// The model: buildings, rooms and desks, derived from one /api/hq read
-// ---------------------------------------------------------------------------
-
-interface RoomModel {
-  id: string;
-  name: string;
-  agent: string;
-  /** Null when sessions were placed in a department org.json does not list. */
-  org: OrgDepartment | null;
-  activity: DepartmentActivity | null;
-  tint: number;
-  pose: Pose;
-  /** The status in words: the caption under the sprite. */
-  statusText: string;
-}
-
-interface BuildingModel {
-  id: string;
-  kind: 'hq' | 'subsidiary' | 'tooling';
-  name: string;
-  subtitle: string;
-  unit: HqUnit | null;
-  subsidiary: Subsidiary | null;
-  archived: boolean;
-  roof: number;
-  rooms: RoomModel[];
-  /** Live sessions at a desk: every live session for HQ and tooling, unplaced ones for a subsidiary. */
-  desks: PlacedSession[];
-}
-
-type Selection =
-  | { kind: 'building'; unit: string }
-  | { kind: 'room'; unit: string; department: string }
-  | { kind: 'desk'; unit: string; session: string };
-
-function sameSelection(a: Selection | null, b: Selection | null): boolean {
-  if (!a || !b || a.kind !== b.kind || a.unit !== b.unit) return false;
-  if (a.kind === 'room' && b.kind === 'room') return a.department === b.department;
-  if (a.kind === 'desk' && b.kind === 'desk') return a.session === b.session;
-  return true;
-}
-
-function roomPose(org: OrgDepartment | null, activity: DepartmentActivity | null): { pose: Pose; text: string } {
-  if (org && !org.agentDefined) return { pose: 'vacant', text: 'vacant: agent not defined' };
-  switch (activity?.status ?? null) {
-    case 'active':
-      return { pose: 'active', text: 'working' };
-    case 'waiting':
-      return { pose: 'waiting', text: 'needs you' };
-    case 'idle':
-      return { pose: 'idle', text: 'idle' };
-    case 'done':
-      return { pose: 'empty', text: 'empty desk: last run done' };
-    default:
-      return { pose: 'empty', text: 'empty desk: no runs yet' };
-  }
-}
-
-const DESK_POSE: Record<SessionStatus, { pose: Pose; text: string }> = {
-  active: { pose: 'active', text: 'working' },
-  waiting: { pose: 'waiting', text: 'needs you' },
-  idle: { pose: 'idle', text: 'idle' },
-  done: { pose: 'empty', text: 'done' },
-};
-
-function buildFloor(data: HqOverview, org: OrgSnapshot): BuildingModel[] {
-  const unitById = new Map(data.units.map((unit) => [unit.id, unit]));
-
-  // One tint per department id, in order of first appearance across the org,
-  // so "Marketing" wears the same colour in every building.
-  const tintOf = new Map<string, number>();
-  for (const subsidiary of org.subsidiaries) {
-    for (const department of subsidiary.departments) {
-      if (!tintOf.has(department.id)) tintOf.set(department.id, (tintOf.size % TINTS) + 1);
-    }
-  }
-  const tint = (id: string): number => {
-    if (!tintOf.has(id)) tintOf.set(id, (tintOf.size % TINTS) + 1);
-    return tintOf.get(id) ?? 1;
-  };
-
-  const buildings: BuildingModel[] = [];
-  const hqUnit = unitById.get('hq') ?? null;
-  buildings.push({
-    id: 'hq',
-    kind: 'hq',
-    name: hqUnit?.name ?? 'HQ',
-    subtitle: 'head office',
-    unit: hqUnit,
-    subsidiary: null,
-    archived: false,
-    roof: 4,
-    rooms: [],
-    desks: hqUnit?.live ?? [],
-  });
-
-  for (const tool of org.tooling) {
-    const unit = unitById.get(tool.id) ?? null;
-    buildings.push({
-      id: tool.id,
-      kind: 'tooling',
-      name: unit?.name ?? tool.id,
-      subtitle: 'workshop',
-      unit,
-      subsidiary: null,
-      archived: false,
-      roof: 6,
-      rooms: [],
-      desks: unit?.live ?? [],
-    });
-  }
-
-  org.subsidiaries.forEach((subsidiary, index) => {
-    const unit = unitById.get(subsidiary.id) ?? null;
-    const activityById = new Map((unit?.departments ?? []).map((a) => [a.department, a]));
-    const rooms: RoomModel[] = subsidiary.departments.map((department) => {
-      const activity = activityById.get(department.id) ?? null;
-      const { pose, text } = roomPose(department, activity);
-      return {
-        id: department.id,
-        name: department.name,
-        agent: department.agent,
-        org: department,
-        activity,
-        tint: tint(department.id),
-        pose,
-        statusText: text,
-      };
-    });
-    // Activity for a department org.json does not list: shown, not dropped.
-    for (const activity of unit?.departments ?? []) {
-      if (subsidiary.departments.some((d) => d.id === activity.department)) continue;
-      const { pose, text } = roomPose(null, activity);
-      rooms.push({
-        id: activity.department,
-        name: activity.department,
-        agent: activity.agent,
-        org: null,
-        activity,
-        tint: tint(activity.department),
-        pose,
-        statusText: text,
-      });
-    }
-    const roomIds = new Set(rooms.map((room) => room.id));
-    buildings.push({
-      id: subsidiary.id,
-      kind: 'subsidiary',
-      name: subsidiary.name,
-      subtitle: `${subsidiary.type} · ${subsidiary.status}`,
-      unit,
-      subsidiary,
-      archived: isArchived(subsidiary),
-      roof: (index % ROOFS) + 1,
-      rooms,
-      // A live session with no department, or one whose department has no
-      // room, waits in the lobby. Work is never hidden.
-      desks: (unit?.live ?? []).filter((s) => s.placement.department === null || !roomIds.has(s.placement.department)),
-    });
-  });
-
-  return buildings;
-}
-
-/** Where on the map an attention item belongs, as a location key. */
-function locate(item: AttentionItem, buildings: BuildingModel[]): { key: string; selection: Selection | null } {
-  const building = buildings.find((b) => b.id === item.unit);
-  if (!building) return { key: 'org', selection: null };
-  if (item.session) {
-    const key = sessionKey(item.session);
-    if (building.desks.some((s) => sessionKey(s) === key)) {
-      return { key: `d:${building.id}:${key}`, selection: { kind: 'desk', unit: building.id, session: key } };
-    }
-  }
-  if (item.department && building.rooms.some((room) => room.id === item.department)) {
-    return {
-      key: `r:${building.id}:${item.department}`,
-      selection: { kind: 'room', unit: building.id, department: item.department },
-    };
-  }
-  return { key: `b:${building.id}`, selection: { kind: 'building', unit: building.id } };
-}
-
-type Pins = Map<string, AttentionItem[]>;
-
-function pinItems(attention: AttentionItem[], buildings: BuildingModel[]): Pins {
-  const pins: Pins = new Map();
-  for (const item of attention) {
-    const { key } = locate(item, buildings);
-    const list = pins.get(key) ?? [];
-    list.push(item);
-    pins.set(key, list);
-  }
-  return pins;
-}
-
-const KIND_WORDS: Record<AttentionKind, [string, string]> = {
-  approval: ['pending approval', 'pending approvals'],
-  'waiting-session': ['session waiting on you', 'sessions waiting on you'],
-  'session-errors': ['session that hit errors', 'sessions that hit errors'],
-  drift: ['drift issue', 'drift issues'],
-  inbox: ['unfiled inbox note', 'unfiled inbox notes'],
-  proposal: ['proposed improvement', 'proposed improvements'],
-  charter: ['unfilled charter', 'unfilled charters'],
-  'review-overdue': ['overdue weekly review', 'overdue weekly reviews'],
-  'org-issue': ['org issue', 'org issues'],
-};
-
-/** Marker order on the map: what needs Connor first. */
-const KIND_ORDER: AttentionKind[] = [
-  'approval',
-  'waiting-session',
-  'session-errors',
-  'charter',
-  'drift',
-  'review-overdue',
-  'inbox',
-  'proposal',
-  'org-issue',
-];
-
-function kindSummary(items: AttentionItem[]): Array<{ kind: AttentionKind; count: number; urgent: boolean; label: string }> {
-  return KIND_ORDER.flatMap((kind) => {
-    const matching = items.filter((item) => item.kind === kind);
-    if (matching.length === 0) return [];
-    const [one, many] = KIND_WORDS[kind];
-    return [
-      {
-        kind,
-        count: matching.length,
-        urgent: matching.some((item) => LEVEL_RANK[item.level] > 0),
-        label: `${matching.length} ${matching.length === 1 ? one : many}`,
-      },
-    ];
-  });
-}
-
-function Markers(props: { items: AttentionItem[] | undefined; only?: AttentionKind[]; except?: AttentionKind[] }): ReactNode {
-  const items = (props.items ?? []).filter(
-    (item) => (!props.only || props.only.includes(item.kind)) && !(props.except ?? []).includes(item.kind),
-  );
-  if (items.length === 0) return null;
-  return (
-    <>
-      {kindSummary(items).map((entry) => (
-        <Marker key={entry.kind} kind={entry.kind as MarkerKind} count={entry.count} urgent={entry.urgent} label={entry.label} />
-      ))}
-    </>
-  );
-}
-
-function markerWords(items: AttentionItem[] | undefined): string {
-  const summary = kindSummary(items ?? []);
-  return summary.length === 0 ? '' : ` ${summary.map((entry) => entry.label).join(', ')}.`;
-}
 
 // ---------------------------------------------------------------------------
 // The view
@@ -474,15 +191,12 @@ function Floor(props: { data: HqOverview; org: OrgSnapshot; now: number }): Reac
   const [showArchived, setShowArchived] = useState(false);
   const inspectorRef = useRef<HTMLDivElement>(null);
 
-  const buildings = buildFloor(data, org);
-  const pins = pinItems(data.attention, buildings);
-  const archivedCount = buildings.filter((b) => b.archived).length;
-  const plaza = buildings.filter((b) => b.kind !== 'subsidiary');
-  const street = buildings.filter((b) => b.kind === 'subsidiary' && (showArchived || !b.archived));
+  const units = useMemo(() => buildFloor(data, org), [data, org]);
+  const pins = useMemo(() => pinItems(data.attention, units), [data.attention, units]);
 
   // A selection that points at something no longer on the map (an archived
-  // building just hidden, a session that ended) closes rather than going blank.
-  const visible = selection ? buildings.find((b) => b.id === selection.unit) : undefined;
+  // room just hidden, a session that ended) closes rather than going blank.
+  const visible = selection ? units.find((u) => u.id === selection.unit) : undefined;
   const live = selection && visible && (!visible.archived || showArchived) ? selection : null;
 
   const select = (next: Selection | null): void => {
@@ -490,8 +204,8 @@ function Floor(props: { data: HqOverview; org: OrgSnapshot; now: number }): Reac
   };
 
   const reveal = (next: Selection): void => {
-    const building = buildings.find((b) => b.id === next.unit);
-    if (building?.archived) setShowArchived(true);
+    const unit = units.find((u) => u.id === next.unit);
+    if (unit?.archived) setShowArchived(true);
     setSelection(next);
   };
 
@@ -506,279 +220,26 @@ function Floor(props: { data: HqOverview; org: OrgSnapshot; now: number }): Reac
   return (
     <div className="floor">
       <div className="floor__map">
-        <div className="map" aria-label="Office map">
-          <div className="map__plaza">
-            {plaza.map((building) => (
-              <Building
-                key={building.id}
-                building={building}
-                pins={pins}
-                selection={live}
-                onSelect={select}
-                now={now}
-              />
-            ))}
-          </div>
-          <div className="map__street">
-            {street.length === 0 ? (
-              <p className="map__empty">
-                No subsidiaries in org.json yet. Add one with <code>org new-subsidiary</code> and its building goes up here.
-              </p>
-            ) : (
-              street.map((building) => (
-                <Building
-                  key={building.id}
-                  building={building}
-                  pins={pins}
-                  selection={live}
-                  onSelect={select}
-                  now={now}
-                />
-              ))
-            )}
-          </div>
-          {archivedCount > 0 && (
-            <div className="map__foot">
-              <button type="button" className="pill" aria-pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
-                show archived
-                <span className="pill__n">{archivedCount}</span>
-              </button>
-              <span className="faint small">{showArchived ? 'boarded up, still inspectable' : 'hidden'}</span>
-            </div>
-          )}
-        </div>
+        <OfficeMap
+          units={units}
+          pins={pins}
+          selection={live}
+          onSelect={select}
+          showArchived={showArchived}
+          onToggleArchived={() => setShowArchived((v) => !v)}
+        />
       </div>
 
       <div className="floor__side">
         <div className="floor__inspector" ref={inspectorRef}>
           {live ? (
-            <Inspector selection={live} buildings={buildings} data={data} org={org} pins={pins} now={now} onClose={() => setSelection(null)} />
+            <Inspector selection={live} units={units} data={data} org={org} pins={pins} now={now} onClose={() => setSelection(null)} />
           ) : (
-            <p className="inspector-hint">Click a room, a desk or a building's sign to look inside.</p>
+            <p className="inspector-hint">Click a desk, a character or a room's sign to look closer.</p>
           )}
         </div>
-        <NoticeBoard data={data} buildings={buildings} selection={live} onReveal={reveal} now={now} />
+        <NoticeBoard data={data} units={units} selection={live} onReveal={reveal} now={now} />
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Buildings
-// ---------------------------------------------------------------------------
-
-function Building(props: {
-  building: BuildingModel;
-  pins: Pins;
-  selection: Selection | null;
-  onSelect: (selection: Selection) => void;
-  now: number;
-}): ReactNode {
-  const { building, pins, selection, onSelect } = props;
-  const subsidiary = building.subsidiary;
-  const here = pins.get(`b:${building.id}`);
-  const charter = (here ?? []).some((item) => item.kind === 'charter');
-  const signSelected = selection?.kind === 'building' && selection.unit === building.id;
-  const missing = subsidiary ? !subsidiary.exists : false;
-
-  const classes = [
-    'bldg',
-    `bldg--${building.kind}`,
-    `roof-${building.roof}`,
-    // Buildings are as wide as their rooms need: two floors of rooms, 2–4 across.
-    building.kind === 'subsidiary' && !building.archived ? `bldg--cols-${Math.min(4, Math.max(2, Math.ceil(building.rooms.length / 2)))}` : '',
-    building.archived ? 'bldg--boarded' : '',
-    charter ? 'bldg--scaffold' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  const signLabel =
-    `${building.name}, ${building.subtitle}.` +
-    (building.archived ? ' Archived and boarded up.' : '') +
-    (missing ? ' Vault missing.' : '') +
-    markerWords(here) +
-    ' Inspect building.';
-
-  return (
-    <article className={classes} aria-label={building.name}>
-      <div className="bldg__top">
-        <Markers items={here} only={['drift']} />
-        <button type="button" className="bldg__sign" aria-pressed={signSelected} aria-label={signLabel} onClick={() => onSelect({ kind: 'building', unit: building.id })}>
-          <span className="bldg__name">{building.name}</span>
-          <span className="bldg__sub">{building.subtitle}</span>
-        </button>
-        {charter && (
-          <span className="bldg__construction">
-            <Markers items={here} only={['charter']} />
-            <span className="bldg__construction-text">charter unfilled</span>
-          </span>
-        )}
-        {missing && <Marker kind="missing" label="Vault missing on disk" urgent />}
-      </div>
-
-      <div className="bldg__body">
-        {building.archived ? (
-          <div className="bldg__boards">
-            <span className="bldg__boards-text">
-              archived{subsidiary?.archived ? ` ${subsidiary.archived}` : ''} · {plural(building.rooms.length, 'room')} boarded up
-            </span>
-          </div>
-        ) : building.kind === 'subsidiary' ? (
-          building.rooms.length === 0 ? (
-            <p className="bldg__empty">
-              No departments in org.json. Add one with <code>org new-department</code> and a room opens here.
-            </p>
-          ) : (
-            <div className="bldg__rooms">
-              {building.rooms.map((room) => (
-                <Room
-                  key={room.id}
-                  building={building}
-                  room={room}
-                  items={pins.get(`r:${building.id}:${room.id}`)}
-                  selected={selection?.kind === 'room' && selection.unit === building.id && selection.department === room.id}
-                  onSelect={() => onSelect({ kind: 'room', unit: building.id, department: room.id })}
-                />
-              ))}
-            </div>
-          )
-        ) : (
-          <OpenPlan building={building} pins={pins} selection={selection} onSelect={onSelect} />
-        )}
-
-        <Lobby building={building} pins={pins} selection={selection} onSelect={onSelect} />
-      </div>
-    </article>
-  );
-}
-
-function Room(props: {
-  building: BuildingModel;
-  room: RoomModel;
-  items: AttentionItem[] | undefined;
-  selected: boolean;
-  onSelect: () => void;
-}): ReactNode {
-  const { building, room, items } = props;
-  const activity = room.activity;
-  const folderMissing = room.org?.folderExists === false;
-  const label =
-    `${room.name} room in ${building.name}. Agent ${room.agent}: ${room.statusText}.` +
-    (activity?.lastTitle && room.pose !== 'empty' && room.pose !== 'vacant' ? ` Working on ${activity.lastTitle}.` : '') +
-    (folderMissing ? ' Department folder missing.' : '') +
-    (room.org === null ? ' Not listed in org.json.' : '') +
-    markerWords(items);
-
-  return (
-    <button
-      type="button"
-      className={`room room--${room.pose}${folderMissing ? ' room--cracked' : ''}`}
-      aria-pressed={props.selected}
-      aria-label={label}
-      onClick={props.onSelect}
-    >
-      <span className="room__wall">
-        <span className="room__plate">{room.name}</span>
-        <span className="room__pins" aria-hidden="true">
-          <Markers items={items} except={room.pose === 'waiting' ? ['waiting-session'] : []} />
-          {folderMissing && <Marker kind="missing" label="Department folder missing" urgent />}
-        </span>
-      </span>
-      <DeskScene pose={room.pose} tint={room.tint} look={hashOf(`${building.id}/${room.id}`)} className="room__scene" />
-      <span className="room__caption" aria-hidden="true">
-        <span className={`room__status room__status--${room.pose}`}>{room.statusText}</span>
-        {activity?.lastTitle && room.pose !== 'empty' && room.pose !== 'vacant' && (
-          <span className="room__doing">{activity.lastTitle}</span>
-        )}
-        {room.org === null && <span className="room__flag">not in org.json</span>}
-      </span>
-    </button>
-  );
-}
-
-/** Head office and workshops: an open floor with one desk per live session. */
-function OpenPlan(props: { building: BuildingModel; pins: Pins; selection: Selection | null; onSelect: (s: Selection) => void }): ReactNode {
-  const { building } = props;
-  if (building.desks.length === 0) {
-    return (
-      <p className="bldg__empty">
-        {building.kind === 'hq'
-          ? 'Nobody at head office right now. A session started in the HQ vault takes a desk here while it runs.'
-          : `The workbench is free. A session started in ${building.name} takes a seat here while it runs.`}
-      </p>
-    );
-  }
-  return (
-    <div className="bldg__desks">
-      {building.desks.map((session) => (
-        <Desk key={sessionKey(session)} building={building} session={session} pins={props.pins} selection={props.selection} onSelect={props.onSelect} />
-      ))}
-    </div>
-  );
-}
-
-function Desk(props: {
-  building: BuildingModel;
-  session: PlacedSession;
-  pins: Pins;
-  selection: Selection | null;
-  onSelect: (s: Selection) => void;
-}): ReactNode {
-  const { building, session } = props;
-  const key = sessionKey(session);
-  const items = props.pins.get(`d:${building.id}:${key}`);
-  const { pose, text } = DESK_POSE[session.status];
-  const selected = props.selection?.kind === 'desk' && props.selection.unit === building.id && props.selection.session === key;
-  return (
-    <button
-      type="button"
-      className={`room room--desk room--${pose}`}
-      aria-pressed={selected}
-      aria-label={`Session at ${building.name}: ${session.title}. Status: ${text}.${markerWords(items)}`}
-      onClick={() => props.onSelect({ kind: 'desk', unit: building.id, session: key })}
-    >
-      <span className="room__pins room__pins--float" aria-hidden="true">
-        {/* The sprite's own bubble already says "waiting"; a second "!" is noise. */}
-        <Markers items={items} except={pose === 'waiting' ? ['waiting-session'] : []} />
-      </span>
-      <DeskScene pose={pose} tint="worker" look={hashOf(key)} className="room__scene" />
-      <span className="room__caption" aria-hidden="true">
-        <span className={`room__status room__status--${pose}`}>{text}</span>
-        <span className="room__doing">{session.title}</span>
-      </span>
-    </button>
-  );
-}
-
-/** The ground floor: a door for notes, a mailbox for approvals, and anyone without a room. */
-function Lobby(props: { building: BuildingModel; pins: Pins; selection: Selection | null; onSelect: (s: Selection) => void }): ReactNode {
-  const { building, pins } = props;
-  const here = pins.get(`b:${building.id}`);
-  const lobbyDesks = building.kind === 'subsidiary' ? building.desks : [];
-  const mail = (here ?? []).filter((item) => item.kind === 'approval').length;
-  const doorLabel = markerWords((here ?? []).filter((item) => item.kind !== 'approval' && item.kind !== 'drift' && item.kind !== 'charter'));
-
-  return (
-    <div className="lobby">
-      <span className={`lobby__mailbox${mail > 0 ? ' lobby__mailbox--full' : ''}`} role="img" aria-label={mail > 0 ? `Mailbox: ${plural(mail, 'pending approval')}` : 'Mailbox: empty'} title={mail > 0 ? plural(mail, 'pending approval') : 'No approvals waiting'}>
-        <span className="lobby__flag" aria-hidden="true" />
-        {mail > 0 && <span className="lobby__mail-n" aria-hidden="true">{mail}</span>}
-      </span>
-      <span className="lobby__door" role="img" aria-label={doorLabel ? `Door:${doorLabel}` : 'Door: nothing pinned'}>
-        <span className="lobby__notes" aria-hidden="true">
-          <Markers items={here} except={['approval', 'drift', 'charter']} />
-        </span>
-      </span>
-      {lobbyDesks.length > 0 ? (
-        <div className="lobby__desks">
-          {lobbyDesks.map((session) => (
-            <Desk key={sessionKey(session)} building={building} session={session} pins={pins} selection={props.selection} onSelect={props.onSelect} />
-          ))}
-        </div>
-      ) : (
-        <span className="lobby__label">{building.kind === 'subsidiary' ? 'lobby' : 'front door'}</span>
-      )}
     </div>
   );
 }
@@ -789,34 +250,34 @@ function Lobby(props: { building: BuildingModel; pins: Pins; selection: Selectio
 
 function Inspector(props: {
   selection: Selection;
-  buildings: BuildingModel[];
+  units: UnitModel[];
   data: HqOverview;
   org: OrgSnapshot;
   pins: Pins;
   now: number;
   onClose: () => void;
 }): ReactNode {
-  const { selection, buildings } = props;
-  const building = buildings.find((b) => b.id === selection.unit);
-  if (!building) return null;
+  const { selection, units } = props;
+  const unit = units.find((u) => u.id === selection.unit);
+  if (!unit) return null;
 
   let body: ReactNode = null;
-  let title = building.name;
-  let kicker = building.subtitle;
-  if (selection.kind === 'room') {
-    const room = building.rooms.find((r) => r.id === selection.department);
-    if (!room) return null;
-    title = room.name;
-    kicker = `${building.name} · room`;
-    body = <RoomInspector building={building} room={room} items={props.pins.get(`r:${building.id}:${room.id}`)} org={props.org} now={props.now} />;
+  let title = unit.name;
+  let kicker = unit.archived ? `${unit.subtitle} · boarded up` : unit.subtitle;
+  if (selection.kind === 'dept') {
+    const dept = unit.depts.find((d) => d.id === selection.department);
+    if (!dept) return null;
+    title = dept.name;
+    kicker = `${unit.name} · workstation`;
+    body = <DeptInspector unit={unit} dept={dept} items={props.pins.get(`r:${unit.id}:${dept.id}`)} org={props.org} now={props.now} />;
   } else if (selection.kind === 'desk') {
-    const session = building.desks.find((s) => sessionKey(s) === selection.session);
+    const session = unit.desks.find((s) => sessionKey(s) === selection.session);
     if (!session) return null;
     title = session.title;
-    kicker = `${building.name} · desk`;
-    body = <DeskInspector session={session} items={props.pins.get(`d:${building.id}:${selection.session}`)} now={props.now} />;
+    kicker = `${unit.name} · hot desk`;
+    body = <DeskInspector session={session} items={props.pins.get(`d:${unit.id}:${selection.session}`)} now={props.now} />;
   } else {
-    body = <BuildingInspector building={building} data={props.data} org={props.org} items={props.pins.get(`b:${building.id}`)} now={props.now} />;
+    body = <UnitInspector unit={unit} data={props.data} org={props.org} items={props.pins.get(`u:${unit.id}`)} now={props.now} />;
   }
 
   return (
@@ -883,22 +344,22 @@ function kpiFill(scorecard: OrgDepartment['scorecard']): { filled: number; total
   return { filled, total: scorecard.kpis.length };
 }
 
-function RoomInspector(props: {
-  building: BuildingModel;
-  room: RoomModel;
+function DeptInspector(props: {
+  unit: UnitModel;
+  dept: DeptModel;
   items: AttentionItem[] | undefined;
   org: OrgSnapshot;
   now: number;
 }): ReactNode {
-  const { building, room, org, now } = props;
+  const { unit, dept: room, org, now } = props;
   const activity = room.activity;
   const fill = kpiFill(room.org?.scorecard ?? null);
-  const charter = building.subsidiary?.charter ?? null;
+  const charter = unit.subsidiary?.charter ?? null;
 
   return (
     <>
       <div className="ins-portrait">
-        <DeskScene pose={room.pose} tint={room.tint} look={hashOf(`${building.id}/${room.id}`)} className="ins-portrait__scene" />
+        <StationPortrait pose={room.pose} tint={room.tint} look={hashOf(`${unit.id}/${room.id}`)} className="ins-portrait__scene" />
         <dl className="kv">
           <dt>agent</dt>
           <dd>
@@ -996,7 +457,7 @@ function DeskInspector(props: { session: PlacedSession; items: AttentionItem[] |
   return (
     <>
       <div className="ins-portrait">
-        <DeskScene pose={DESK_POSE[session.status].pose} tint="worker" look={hashOf(sessionKey(session))} className="ins-portrait__scene" />
+        <StationPortrait pose={DESK_POSE[session.status].pose} tint="worker" look={hashOf(sessionKey(session))} className="ins-portrait__scene" />
         <dl className="kv">
           <dt>status</dt>
           <dd>
@@ -1042,14 +503,14 @@ function DeskInspector(props: { session: PlacedSession; items: AttentionItem[] |
   );
 }
 
-function BuildingInspector(props: {
-  building: BuildingModel;
+function UnitInspector(props: {
+  unit: UnitModel;
   data: HqOverview;
   org: OrgSnapshot;
   items: AttentionItem[] | undefined;
   now: number;
 }): ReactNode {
-  const { building, org, now } = props;
+  const { unit: building, org, now } = props;
   const subsidiary = building.subsidiary;
   const unit = building.unit;
   const tool = building.kind === 'tooling' ? org.tooling.find((t) => t.id === building.id) : undefined;
@@ -1190,7 +651,7 @@ function BuildingInspector(props: {
       )}
 
       {subsidiary && building.archived && (
-        <Block label="Rooms">
+        <Block label="Desks">
           <p className="small muted">{subsidiary.departments.map((d) => d.name).join(' · ') || 'none'}</p>
         </Block>
       )}
@@ -1214,7 +675,7 @@ function BuildingInspector(props: {
       </Block>
 
       {(inbox.length > 0 || proposals.length > 0) && (
-        <Block label="On the door">
+        <Block label="On the notice board">
           <ul className="ins-list">
             {[...inbox.map((note) => ({ note, what: 'inbox' })), ...proposals.map((note) => ({ note, what: 'proposal' }))]
               .slice(0, 6)
@@ -1276,12 +737,12 @@ const LEVEL_WORD: Record<IssueLevel, string> = { error: 'urgent', warn: 'needs y
 
 function NoticeBoard(props: {
   data: HqOverview;
-  buildings: BuildingModel[];
+  units: UnitModel[];
   selection: Selection | null;
   onReveal: (selection: Selection) => void;
   now: number;
 }): ReactNode {
-  const { data, buildings, now } = props;
+  const { data, units, now } = props;
   const [showInfo, setShowInfo] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const root = data.org?.root ?? '';
@@ -1293,10 +754,10 @@ function NoticeBoard(props: {
   const shown = showAll ? listed : listed.slice(0, BOARD_CAP);
 
   const where = (item: AttentionItem): string => {
-    const building = buildings.find((b) => b.id === item.unit);
-    if (!building) return 'org-wide';
-    const room = item.department ? building.rooms.find((r) => r.id === item.department) : undefined;
-    return room ? `${building.name} · ${room.name}` : item.department ? `${building.name} · ${item.department}` : building.name;
+    const unit = units.find((u) => u.id === item.unit);
+    if (!unit) return 'org-wide';
+    const dept = item.department ? unit.depts.find((d) => d.id === item.department) : undefined;
+    return dept ? `${unit.name} · ${dept.name}` : item.department ? `${unit.name} · ${item.department}` : unit.name;
   };
 
   return (
@@ -1318,7 +779,7 @@ function NoticeBoard(props: {
       ) : (
         <ul className="board__slips">
           {shown.map((item) => {
-            const { selection } = locate(item, buildings);
+            const { selection } = locate(item, units);
             const approval =
               item.kind === 'approval' && item.path
                 ? data.org?.subsidiaries.find((s) => s.id === item.unit)?.approvals.find((a) => a.path === item.path)
