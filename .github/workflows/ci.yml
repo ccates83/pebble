@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, stable]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22.5+ for the built-in node:sqlite module.
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # typecheck -> build -> test, in that order. The tests import
+      # packages/core/dist, so the build has to happen first.
+      - run: pnpm run check
+
+      # The CLI must work on a machine with no agent tool installed at all —
+      # that is the "not installed" path in every adapter's detect().
+      - name: CLI works with no agent tool present
+        env:
+          PEBBLE_CLAUDE_DIR: /tmp/definitely-not-here
+          PEBBLE_DATA_DIR: /tmp/pebble-ci
+        run: |
+          node packages/cli/bin/pebble.mjs --help
+          node packages/cli/bin/pebble.mjs where
+          node packages/cli/bin/pebble.mjs index --json
+          node packages/cli/bin/pebble.mjs sessions

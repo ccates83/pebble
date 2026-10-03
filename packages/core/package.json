@@ -1,0 +1,13 @@
+{
+  "name": "@pebble/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./adapters/claude-code": "./dist/adapters/claude-code/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": { "build": "tsc --build", "clean": "rm -rf dist *.tsbuildinfo" }
+}

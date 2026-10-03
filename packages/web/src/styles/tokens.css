@@ -1,0 +1,111 @@
+/*
+ * Pebble's design tokens.
+ *
+ * Four brand colours with non-overlapping roles, plus two semantic state
+ * colours (a status light has to be readable as a status light, and overloading
+ * the accent for "running" would make every interactive element look live).
+ *
+ * Everything else — surfaces, rules, muted text — is derived from these, so
+ * retheming is editing this block and nothing else. No component hard-codes a
+ * colour, and nothing in this project uses an inline style.
+ */
+:root {
+  /* -- brand roles ------------------------------------------------------- */
+  --c-primary: #33332c;   /* headings, nav, strong text */
+  --c-accent: #9a4a2f;    /* interactive: links, active nav, selected rows */
+  --c-signal: #a9741f;    /* attention: warnings, estimated figures */
+  --c-bg: #f2efe9;        /* page — limestone, never #fff */
+
+  /* -- semantic states --------------------------------------------------- */
+  --c-live: #3f6f4f;      /* an agent is working right now */
+  --c-fault: #a33528;     /* errors, failures, broken links */
+
+  /* -- derived ----------------------------------------------------------- */
+  --c-surface: #faf8f4;
+  --c-surface-sunk: #ebe7df;
+  --c-rule: #d9d3c7;
+  --c-rule-strong: #c2baa9;
+  --c-text: #33332c;
+  --c-text-muted: #6d6a5e;
+  --c-text-faint: #8d8979;
+  /* Tints for row/pill backgrounds — a wash, never a coloured left border. */
+  --c-accent-wash: rgb(154 74 47 / 9%);
+  --c-live-wash: rgb(63 111 79 / 11%);
+  --c-signal-wash: rgb(169 116 31 / 13%);
+  --c-fault-wash: rgb(163 53 40 / 10%);
+
+  /* -- type -------------------------------------------------------------- */
+  --font-display: Fraunces, 'Hoefler Text', 'Iowan Old Style', Palatino, Georgia, serif;
+  --font-body: 'Public Sans', 'Helvetica Neue', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  --fs-micro: 0.6875rem;
+  --fs-small: 0.78125rem;
+  --fs-base: 0.875rem;
+  --fs-lead: 1rem;
+  --fs-h3: 1.0625rem;
+  --fs-h2: clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem);
+  --fs-h1: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+
+  /* -- space: varied on purpose, not one padding everywhere -------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: clamp(1.5rem, 1rem + 2vw, 2.5rem);
+
+  --radius: 3px;
+  --radius-pill: 999px;
+  /* Real objects decelerate; nothing here bounces. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 140ms;
+  --rail-w: 13rem;
+}
+
+/*
+ * Dark mode follows the system unless the page says otherwise, and
+ * [data-theme="dark"] forces it. Nothing here is pure black — the surfaces are
+ * tinted toward the same warm hue as the light theme.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+  --c-primary: #e8e3d7;
+  --c-accent: #d98762;
+  --c-signal: #d9a84e;
+  --c-bg: #1c1e1b;
+  --c-live: #74b088;
+  --c-fault: #e0806f;
+  --c-surface: #242723;
+  --c-surface-sunk: #171915;
+  --c-rule: #3a3e38;
+  --c-rule-strong: #4e534b;
+  --c-text: #e8e3d7;
+  --c-text-muted: #a5a294;
+  --c-text-faint: #807d71;
+  --c-accent-wash: rgb(217 135 98 / 14%);
+  --c-live-wash: rgb(116 176 136 / 15%);
+  --c-signal-wash: rgb(217 168 78 / 16%);
+  --c-fault-wash: rgb(224 128 111 / 15%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --c-primary: #e8e3d7;
+  --c-accent: #d98762;
+  --c-signal: #d9a84e;
+  --c-bg: #1c1e1b;
+  --c-live: #74b088;
+  --c-fault: #e0806f;
+  --c-surface: #242723;
+  --c-surface-sunk: #171915;
+  --c-rule: #3a3e38;
+  --c-rule-strong: #4e534b;
+  --c-text: #e8e3d7;
+  --c-text-muted: #a5a294;
+  --c-text-faint: #807d71;
+  --c-accent-wash: rgb(217 135 98 / 14%);
+  --c-live-wash: rgb(116 176 136 / 15%);
+  --c-signal-wash: rgb(217 168 78 / 16%);
+  --c-fault-wash: rgb(224 128 111 / 15%);
+}

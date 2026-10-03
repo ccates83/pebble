@@ -1,0 +1,14 @@
+{
+  "name": "pebble",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "pebble": "./bin/pebble.mjs" },
+  "exports": { ".": "./dist/index.js" },
+  "types": "./dist/index.d.ts",
+  "scripts": { "build": "tsc --build", "clean": "rm -rf dist *.tsbuildinfo" },
+  "dependencies": {
+    "@pebble/core": "workspace:*",
+    "@pebble/server": "workspace:*"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.local
+*.log
+
+# Pebble's local index is a derived cache — rebuildable from ~/.claude at any time.
+.pebble/
+data/*.db
+data/*.db-shm
+data/*.db-wal

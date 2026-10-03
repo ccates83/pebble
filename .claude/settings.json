@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install)",
+      "Bash(pnpm build)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm test)",
+      "Bash(pnpm check)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm clean)",
+      "Bash(pnpm --filter:*)",
+      "Bash(npx tsc --build:*)",
+      "Bash(node --test:*)",
+      "Bash(node packages/cli/bin/pebble.mjs:*)",
+      "Bash(curl -s http://127.0.0.1:7777/*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Write(~/.claude/**)",
+      "Edit(~/.claude/**)"
+    ]
+  }
+}
