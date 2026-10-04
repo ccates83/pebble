@@ -129,6 +129,20 @@ test('injected text never becomes the session title', async () => {
   assert.equal(parsed.summary.userTurns, 1, 'the injected reminder is not a turn');
 });
 
+test("a teammate's task is titled by the lead's summary, not its wrapper", async () => {
+  const wrapped = (content) => [
+    { type: 'user', uuid: 'u1', isSidechain: true, timestamp: '2026-10-02T11:59:30.000Z', message: { role: 'user', content } },
+    assistant({ usage: USAGE }),
+  ];
+  const withSummary = await parseTranscript(
+    (await writeTranscript(wrapped('<teammate-message teammate_id="team-lead" summary="Fix site 404 links">\nApply the pending proposal…'))).path,
+  );
+  assert.equal(withSummary.summary.title, 'Fix site 404 links');
+
+  const bare = await parseTranscript((await writeTranscript(wrapped('<teammate-message teammate_id="team-lead">\nAudit the pricing page\n</teammate-message>'))).path);
+  assert.equal(bare.summary.title, 'Audit the pricing page');
+});
+
 test('an explicit title beats a generated one, which beats the first prompt', async () => {
   const base = [
     { type: 'user', uuid: 'u1', timestamp: '2026-10-02T12:00:00.000Z', message: { role: 'user', content: 'first prompt' } },

@@ -281,7 +281,7 @@ export async function parseTranscript(
           // one is the task the agent was handed — which is exactly the title we
           // want for it. So the prompt is captured regardless of sidechain, while
           // only real turns are counted above.
-          if (!firstPrompt) firstPrompt = truncate(text, 400);
+          if (!firstPrompt) firstPrompt = truncate(unwrapTeammateMessage(text), 400);
           if (withEvents) {
             events.push({
               sessionId,
@@ -508,6 +508,20 @@ function reconcileCost(
   }
 
   return result;
+}
+
+/**
+ * Agent-team teammates are handed their task wrapped as
+ * `<teammate-message teammate_id="…" summary="…">task</teammate-message>`.
+ * The summary is the lead's own one-line name for the task, so it makes the
+ * title; without one, the bare task text does.
+ */
+export function unwrapTeammateMessage(text: string): string {
+  const open = /^\s*<teammate-message\b([^>]*)>/.exec(text);
+  if (!open) return text;
+  const summary = /\bsummary="([^"]*)"/.exec(open[1] ?? '')?.[1]?.trim();
+  if (summary) return summary;
+  return text.slice(open[0].length).replace(/<\/teammate-message>\s*$/, '').trim() || text;
 }
 
 function pickTitle(input: {

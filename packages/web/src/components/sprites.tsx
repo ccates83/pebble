@@ -232,6 +232,107 @@ export function SeatedSprite(props: { pose: SeatedPose; style: number }): ReactN
   );
 }
 
+// ---------------------------------------------------------------------------
+// Kids: a sub-agent, drawn as a small character standing at its parent's desk.
+// 8 pixels wide, 13 tall: a 6-row head on a 7-row body. Same palette slots as
+// the grown-ups, so lookClasses dresses them the same way.
+// ---------------------------------------------------------------------------
+
+const KID_HEADS: Record<Facing, readonly Grid[]> = {
+  down: [
+    ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osesseso', '.orssro.'],
+    ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohhsshho', 'ohesseho', 'ohrssrho'],
+    ['.o.oo.o.', 'ohohhoho', 'ohhhhhho', 'ohssssho', 'osesseso', '.orssro.'],
+  ],
+  up: [
+    ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohhhhhho', 'ohhhhhho', '.ohhhho.'],
+    ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohhhhhho', 'ohhhhhho', 'ohhhhhho'],
+    ['.o.oo.o.', 'ohohhoho', 'ohhhhhho', 'ohhhhhho', 'oshhhhso', '.ohhhho.'],
+  ],
+  side: [
+    ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohhhssso', 'ohhsseso', '.ohssso.'],
+    ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohhhssso', 'ohhhseso', 'ohhossso'],
+    ['.o.oo.o.', 'ohohhoho', 'ohhhhhho', 'ohhhssso', 'ohhsseso', '.ohssso.'],
+  ],
+};
+
+function kidHead(facing: Facing, style: number): Grid {
+  const heads = KID_HEADS[facing];
+  return heads[style % heads.length] ?? heads[0] ?? [];
+}
+
+const KID_TORSO: Grid = ['.occcco.', 'occcccco', 'oCccccCo'];
+const KID_TORSO_SIDE: Grid = ['..occo..', '..occco.', '..oCcco.'];
+const KID_LEGS: Grid = ['.oppppo.', '.opoopo.', '.ofoofo.', '.oo..oo.'];
+const KID_LEGS_STEP: Grid = ['.oppppo.', '.opoofo.', '.ofo.oo.', '.oo.....'];
+const KID_LEGS_SIDE: Grid = ['..oppo..', '..oppo..', '..offfo.', '..ooooo.'];
+const KID_LEGS_STRIDE: Grid = ['.oppppo.', 'opo..opo', 'ofo..ofo', 'oo....oo'];
+/** Arms up at the desk, reaching for the keyboard; mirrored for the second frame. */
+const KID_TORSO_REACH: Grid = ['socccco.', '.occccos', '.oCccCo.'];
+
+function kidStanding(facing: Facing, style: number, legs: Grid): Grid {
+  return [...kidHead(facing, style), ...(facing === 'side' ? KID_TORSO_SIDE : KID_TORSO), ...legs];
+}
+
+/** A two-frame walk for every facing: legs apart, then together (or the mirrored step). */
+function kidWalkFrames(facing: Facing, style: number): Grid[] {
+  if (facing === 'side') return [kidStanding('side', style, KID_LEGS_STRIDE), kidStanding('side', style, KID_LEGS_SIDE)];
+  return [kidStanding(facing, style, KID_LEGS_STEP), kidStanding(facing, style, mirror(KID_LEGS_STEP))];
+}
+
+/** At the desk, 8 x 13: busy with its back to you, turned round to ask, or sat on the floor. */
+function kidFrames(pose: SeatedPose, style: number): Grid[] {
+  if (pose === 'active') {
+    const frame = [...kidHead('up', style), ...KID_TORSO_REACH, ...KID_LEGS];
+    return [frame, mirror(frame)];
+  }
+  if (pose === 'idle') {
+    // Sat on the floor, knees up, facing you.
+    const blank = '........';
+    return [[blank, blank, blank, ...kidHead('down', style), 'occcccco', 'oCccccCo', 'offppffo', '.oooooo.']];
+  }
+  return [kidStanding('down', style, KID_LEGS)];
+}
+
+const KID_BUBBLE: Grid = ['ooooo', 'otzto', 'otzto', 'ottto', 'otzto', 'ooooo', '.oo..'];
+
+/** A sub-agent at its parent's desk, in a 16 x 21 viewport with headroom for the "!" and the Zs. */
+export function KidSprite(props: { pose: SeatedPose; style: number }): ReactNode {
+  const frames = props.pose === 'active' ? 2 : 1;
+  return (
+    <svg className={`spr-kid spr-kid--${props.pose}`} viewBox="-4 -8 16 21" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      <svg x={0} y={0} width={8} height={13} viewBox="0 0 8 13" overflow="hidden">
+        <g className={frames > 1 ? 'spr-sheet spr-sheet--kid' : 'spr-sheet'}>{sheet(`kid-${props.pose}-${props.style % 3}`, () => kidFrames(props.pose, props.style), 8)}</g>
+      </svg>
+      {props.pose === 'waiting' && <Pixels grid={KID_BUBBLE} x={5} y={-8} className="spr-bubble" />}
+      {props.pose === 'idle' && (
+        <g className="spr-zz">
+          <Pixels grid={ZED} x={7} y={-3} className="spr-z spr-z--1" />
+          <Pixels grid={ZED} x={7} y={-3} className="spr-z spr-z--2" />
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/** A sub-agent walking to or from its parent's desk: a two-frame strip. */
+export function KidWalkSprite(props: { facing: Facing; style: number }): ReactNode {
+  return (
+    <svg className="spr-walk spr-walk--kid" viewBox="0 0 8 13" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      <g className="spr-sheet">{sheet(`kidwalk-${props.facing}-${props.style % 3}`, () => kidWalkFrames(props.facing, props.style), 8)}</g>
+    </svg>
+  );
+}
+
+/** A sub-agent standing still, for the beat before it walks off. */
+export function KidStandSprite(props: { facing: Facing; style: number }): ReactNode {
+  return (
+    <svg className="spr-stand" viewBox="0 0 8 13" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+      {sheet(`kidstand-${props.facing}-${props.style % 3}`, () => [kidStanding(props.facing, props.style, props.facing === 'side' ? KID_LEGS_SIDE : KID_LEGS)], 8)}
+    </svg>
+  );
+}
+
 // 3x5 letters (N is four wide) for signs drawn in pixels rather than type.
 const LETTERS: Record<string, Grid> = {
   V: ['z.z', 'z.z', 'z.z', 'z.z', '.z.'],

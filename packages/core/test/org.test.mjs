@@ -397,6 +397,68 @@ test('the overview joins sessions to units and departments', async () => {
   store.close();
 });
 
+const subRun = (overrides = {}) => ({
+  id: 'sub',
+  parentSessionId: 's',
+  agentType: null,
+  title: 'A sub-agent',
+  models: [],
+  startedAt: '2026-10-02T10:00:00.000Z',
+  lastActivityAt: '2026-10-02T11:00:00.000Z',
+  status: 'done',
+  pendingToolCalls: 0,
+  toolCalls: 1,
+  tokens: ZERO_TOKENS,
+  cost: { usd: 0, basis: 'exact', unpricedModels: [] },
+  errorCount: 0,
+  transcriptPath: '/s.jsonl',
+  transcriptBytes: 1,
+  ...overrides,
+});
+
+test('live sessions carry their live sub-agents, and a quiet parent with one stays on the floor', async () => {
+  const { root } = await makeOrg();
+  const org = await readOrg(root);
+  const now = Date.parse('2026-10-02T12:00:00.000Z');
+  const store = new PebbleStore(':memory:');
+  const vault = join(root, 'consulting');
+
+  write(store, session({ id: 'busy', projectPath: vault, status: 'active', lastActivityAt: '2026-10-02T11:50:00.000Z' }), [
+    subRun({ id: 'late', parentSessionId: 'busy', agentType: 'legal', status: 'waiting', startedAt: '2026-10-02T11:30:00.000Z', errorCount: 2 }),
+    subRun({ id: 'finished', parentSessionId: 'busy', status: 'done', startedAt: '2026-10-02T10:00:00.000Z' }),
+    subRun({ id: 'early', parentSessionId: 'busy', status: 'active', startedAt: '2026-10-02T11:00:00.000Z' }),
+  ]);
+  write(store, session({ id: 'quiet', projectPath: vault, status: 'done', lastActivityAt: '2026-10-02T11:40:00.000Z' }), [
+    subRun({ id: 'background', parentSessionId: 'quiet', status: 'idle', title: 'Background sweep' }),
+  ]);
+  write(store, session({ id: 'gone', projectPath: vault, status: 'done', lastActivityAt: '2026-10-02T11:45:00.000Z' }), [
+    subRun({ id: 'over', parentSessionId: 'gone', status: 'done' }),
+  ]);
+
+  const c = buildHqOverview(store, org, now, { root, source: 'flag' }).units.find((u) => u.id === 'consulting');
+  assert.deepEqual(c.live.map((s) => s.id), ['busy', 'quiet'], 'newest first; a done parent with only done sub-agents is not live');
+
+  const busy = c.live.find((s) => s.id === 'busy');
+  assert.deepEqual(busy.liveSubagents.map((r) => r.id), ['early', 'late'], 'live runs only, oldest first');
+  assert.deepEqual(busy.liveSubagents[1], {
+    id: 'late',
+    agentType: 'legal',
+    title: 'A sub-agent',
+    status: 'waiting',
+    startedAt: '2026-10-02T11:30:00.000Z',
+    lastActivityAt: '2026-10-02T11:00:00.000Z',
+    errorCount: 2,
+  });
+
+  const quiet = c.live.find((s) => s.id === 'quiet');
+  assert.equal(quiet.status, 'done', "the parent's own status is left as measured");
+  assert.deepEqual(quiet.liveSubagents.map((r) => r.id), ['background']);
+
+  assert.deepEqual(c.recent.map((s) => s.id), ['busy', 'gone', 'quiet'], 'recent is unchanged');
+  assert.ok(c.recent.every((s) => !('liveSubagents' in s)));
+  store.close();
+});
+
 test('attention: most urgent first, and archived units only raise approvals', async () => {
   const { root } = await makeOrg();
   const org = await readOrg(root);

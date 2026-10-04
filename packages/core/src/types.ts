@@ -511,13 +511,32 @@ export interface DepartmentActivity {
   lastSession: { adapter: string; id: string } | null;
 }
 
+/** A sub-agent run that is still active, waiting or idle: drawn as a helper at its parent's desk. */
+export interface LiveSubagent {
+  id: string;
+  agentType: string | null;
+  title: string;
+  status: SessionStatus;
+  startedAt: string;
+  lastActivityAt: string;
+  errorCount: number;
+}
+
+/** A live session on the HQ map, with the sub-agent runs it has going right now. */
+export type HqLiveSession = SessionSummary & { placement: OrgPlacement; liveSubagents: LiveSubagent[] };
+
 /** HQ, a subsidiary, or a tooling repo, with its sessions joined in. */
 export interface HqUnit {
   id: string;
   kind: 'hq' | 'subsidiary' | 'tooling';
   name: string;
-  /** Sessions currently active, waiting or idle, each with its placement. */
-  live: Array<SessionSummary & { placement: OrgPlacement }>;
+  /**
+   * Sessions currently active, waiting or idle, each with its placement — plus
+   * any session whose own status is `done` but which still has live sub-agents
+   * (a parent that went quiet while background sub-agents work). Its `status`
+   * is left as measured; the UI says in words that its sub-agents are running.
+   */
+  live: HqLiveSession[];
   /** Most recent sessions, newest first, capped. */
   recent: Array<SessionSummary & { placement: OrgPlacement }>;
   departments: DepartmentActivity[];

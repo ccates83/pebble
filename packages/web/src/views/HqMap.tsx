@@ -3,6 +3,9 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import type { AttentionItem, AttentionKind } from '@pebble/core';
 import {
   COOLER,
+  KidSprite,
+  KidStandSprite,
+  KidWalkSprite,
   MailboxArt,
   Marker,
   PLANT_LEAVES,
@@ -95,6 +98,37 @@ function seatPoint(index: number, geo: Geometry): Point {
   return { x: at.x + SEAT_X + 6, y: at.y + SEAT_Y + 24 };
 }
 
+/*
+ * Where a sub-agent stands, in station coordinates: two spots either side of
+ * the chair (16..28), the nearer pair first, in front of the desk and clear of
+ * the nameplate card, which starts at y 43.
+ */
+const KID_SPOTS: readonly Point[] = [
+  { x: 11, y: 42 },
+  { x: 33, y: 42 },
+  { x: 3, y: 42 },
+  { x: 41, y: 42 },
+];
+
+function kidPoint(index: number, slot: number, geo: Geometry): Point {
+  const at = stationAt(index, geo.cols);
+  const spot = KID_SPOTS[slot] ?? KID_SPOTS[0] ?? { x: 11, y: 42 };
+  return { x: at.x + spot.x, y: at.y + spot.y };
+}
+
+/** A sub-agent's walk in: the same door and lane as a grown-up, then up to its spot beside the chair. */
+function kidPathIn(index: number, slot: number, geo: Geometry): Point[] {
+  const at = stationAt(index, geo.cols);
+  const spot = kidPoint(index, slot, geo);
+  const lane = at.y + 62;
+  return [
+    { x: DOOR_X, y: geo.h + 22 },
+    { x: DOOR_X, y: lane },
+    { x: spot.x, y: lane },
+    spot,
+  ];
+}
+
 function vars(values: Record<string, number>): CSSProperties {
   const style: Record<string, string> = {};
   for (const [name, value] of Object.entries(values)) style[`--${name}`] = String(Math.round(value * 100) / 100);
@@ -115,6 +149,8 @@ interface Occupant {
   pose: SeatedPose;
   tint: number | 'worker';
   look: number;
+  /** A sub-agent standing at the desk, in this spot beside the chair. */
+  kid?: number;
 }
 
 interface Walker extends Occupant {
@@ -135,11 +171,13 @@ const castMemory = new Map<string, Map<string, Occupant>>();
 let entranceShown = false;
 
 function occupantsOf(stations: StationModel[]): Occupant[] {
-  return stations.flatMap((station) =>
-    station.occupant && (station.pose === 'active' || station.pose === 'waiting' || station.pose === 'idle')
+  return stations.flatMap((station) => [
+    ...(station.occupant && (station.pose === 'active' || station.pose === 'waiting' || station.pose === 'idle')
       ? [{ id: station.occupant, index: station.index, pose: station.pose, tint: station.tint, look: station.look }]
-      : [],
-  );
+      : []),
+    // Sub-agents wear their desk's colours: they are that desk's helpers.
+    ...station.kids.map((kid) => ({ id: kid.id, index: station.index, pose: kid.pose, tint: station.tint, look: kid.look, kid: kid.slot })),
+  ]);
 }
 
 function initialCast(roomId: string, occupants: Occupant[], entranceBase: number): Walker[] {
@@ -194,7 +232,7 @@ function reconcile(current: Walker[], occupants: Occupant[]): Walker[] {
 
 function useCast(roomId: string, occupants: Occupant[], entranceBase: number): [Walker[], (walker: Walker) => void] {
   const [walkers, setWalkers] = useState<Walker[]>(() => initialCast(roomId, occupants, entranceBase));
-  const signature = occupants.map((o) => `${o.id}@${o.index}:${o.pose}`).join('|');
+  const signature = occupants.map((o) => `${o.id}@${o.index}${o.kid === undefined ? '' : `/${o.kid}`}:${o.pose}`).join('|');
   const latest = useRef(occupants);
   latest.current = occupants;
 
@@ -210,7 +248,10 @@ function useCast(roomId: string, occupants: Occupant[], entranceBase: number): [
   }, [signature]);
 
   useEffect(() => {
-    castMemory.set(roomId, new Map(walkers.filter((w) => w.phase !== 'out').map((w) => [w.id, { id: w.id, index: w.index, pose: w.pose, tint: w.tint, look: w.look }])));
+    castMemory.set(
+      roomId,
+      new Map(walkers.filter((w) => w.phase !== 'out').map((w) => [w.id, { id: w.id, index: w.index, pose: w.pose, tint: w.tint, look: w.look, kid: w.kid }])),
+    );
   }, [roomId, walkers]);
 
   const finished = useCallback((done: Walker) => {
@@ -238,7 +279,9 @@ function WalkerSprite(props: { walker: Walker; geo: Geometry; onDone: (walker: W
   const { walker, geo, onDone } = props;
   const style = styleOf(walker.look);
   const dress = lookClasses(walker.tint, walker.look);
-  const path = walker.phase === 'in' ? pathIn(walker.index, geo) : walker.phase === 'out' ? [...pathIn(walker.index, geo)].reverse() : [];
+  const kid = walker.kid;
+  const route = (): Point[] => (kid === undefined ? pathIn(walker.index, geo) : kidPathIn(walker.index, kid, geo));
+  const path = walker.phase === 'in' ? route() : walker.phase === 'out' ? [...route()].reverse() : [];
   const [leg, setLeg] = useState(0);
   const last = path.length - 1;
 
@@ -253,6 +296,15 @@ function WalkerSprite(props: { walker: Walker; geo: Geometry; onDone: (walker: W
     // The path is derived from the walker; the leg is the only clock.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leg, walker.phase, walker.gen]);
+
+  if (walker.phase === 'seated' && kid !== undefined) {
+    const spot = kidPoint(walker.index, kid, geo);
+    return (
+      <div className={`walker walker--kid walker--seated ${dress}`} style={vars({ x: spot.x, y: spot.y, z: spot.y })}>
+        <KidSprite pose={walker.pose} style={style} />
+      </div>
+    );
+  }
 
   if (walker.phase === 'seated') {
     const seat = seatPoint(walker.index, geo);
@@ -269,10 +321,20 @@ function WalkerSprite(props: { walker: Walker; geo: Geometry; onDone: (walker: W
   const { facing, left } = moving ? facingOf(before, here) : { facing: (walker.phase === 'in' ? 'up' : 'down') as Facing, left: false };
   return (
     <div
-      className={`walker walker--${moving ? 'walking' : 'standing'}${left ? ' walker--left' : ''} ${dress}`}
+      className={`walker${kid === undefined ? '' : ' walker--kid'} walker--${moving ? 'walking' : 'standing'}${left ? ' walker--left' : ''} ${dress}`}
       style={vars({ x: here.x, y: here.y, z: here.y, t: moving ? legMs(before, here) : 0 })}
     >
-      {moving ? <WalkSprite facing={facing} style={style} /> : <StandSprite facing={facing} style={style} />}
+      {kid === undefined ? (
+        moving ? (
+          <WalkSprite facing={facing} style={style} />
+        ) : (
+          <StandSprite facing={facing} style={style} />
+        )
+      ) : moving ? (
+        <KidWalkSprite facing={facing} style={style} />
+      ) : (
+        <KidStandSprite facing={facing} style={style} />
+      )}
     </div>
   );
 }
@@ -328,7 +390,7 @@ export function OfficeMap(props: {
     stacks[target]?.push(unit);
     heights[target] = (heights[target] ?? 0) + geometry(unit.stations.length, cols).h + 24;
     entranceBase.set(unit.id, seen);
-    seen += unit.stations.filter((s) => s.occupant).length;
+    seen += unit.stations.reduce((sum, s) => sum + (s.occupant ? 1 : 0) + s.kids.length, 0);
   }
 
   return (
@@ -400,11 +462,29 @@ function Room(props: {
   for (let index = stations.length; index < geo.count; index += 1) {
     if (unit.archived && unit.kind === 'subsidiary' && index >= needed) break;
     const seat = index - unit.depts.length;
-    stations.push({ key: `h:${seat}`, index, kind: 'hot', dept: null, session: null, pose: 'empty', statusText: 'free hot desk', caption: 'free', plate: 'hot desk', tint: 'worker', look: 0, occupant: null });
+    stations.push({
+      key: `h:${seat}`,
+      index,
+      kind: 'hot',
+      dept: null,
+      session: null,
+      pose: 'empty',
+      statusText: 'free hot desk',
+      caption: 'free',
+      subsCaption: null,
+      subagents: [],
+      kids: [],
+      kidsHidden: 0,
+      plate: 'hot desk',
+      tint: 'worker',
+      look: 0,
+      occupant: null,
+    });
   }
 
-  // The monitor follows whoever is actually in the chair, so it lights up as they sit.
-  const seated = new Map(walkers.filter((w) => w.phase === 'seated').map((w) => [w.index, w.pose]));
+  // The monitor follows whoever is actually in the chair, so it lights up as
+  // they sit. Sub-agents standing beside it do not touch it.
+  const seated = new Map(walkers.filter((w) => w.phase === 'seated' && w.kid === undefined).map((w) => [w.index, w.pose]));
 
   const here = pins.get(`u:${unit.id}`);
   const subsidiary = unit.subsidiary;
@@ -539,9 +619,19 @@ function Station(props: {
   const labels = (
     <span className="station__labels" aria-hidden="true">
       <span className="station__plate">{station.plate}</span>
-      <span className={`station__status station__status--${station.pose}`}>{station.caption}</span>
+      <span className={`station__status station__status--${station.pose}`}>
+        <span className="station__word">{station.caption}</span>
+        {station.subsCaption && <span className="station__subs">· {station.subsCaption}</span>}
+      </span>
     </span>
   );
+  const more =
+    station.kidsHidden > 0 ? (
+      <span className="station__more" aria-hidden="true" title={`${plural(station.kidsHidden, 'more sub-agent')} running, not drawn`}>
+        +{station.kidsHidden}
+      </span>
+    ) : null;
+  const moreWords = station.kidsHidden > 0 ? ` ${plural(station.kidsHidden, 'sub-agent')} not drawn for lack of room.` : '';
 
   if (station.kind === 'dept' && station.dept && !unit.archived) {
     const dept = station.dept;
@@ -553,6 +643,7 @@ function Station(props: {
       (working ? ` Working on ${dept.activity?.lastTitle}.` : '') +
       (folderMissing ? ' Department folder missing.' : '') +
       (dept.org === null ? ' Not listed in org.json.' : '') +
+      moreWords +
       markerWords(items);
     return (
       <button
@@ -569,6 +660,7 @@ function Station(props: {
           <Markers items={items} except={station.pose === 'waiting' ? ['waiting-session'] : []} />
           {folderMissing && <Marker kind="missing" label="Department folder missing" urgent />}
         </span>
+        {more}
         {labels}
       </button>
     );
@@ -584,13 +676,14 @@ function Station(props: {
         className={`station at at--box station--hot station--${station.pose}`}
         style={box}
         aria-pressed={selection?.kind === 'desk' && selection.unit === unit.id && selection.session === key}
-        aria-label={`Hot desk in ${unit.name}: ${session.title}. Status: ${station.statusText}.${markerWords(items)}`}
+        aria-label={`Hot desk in ${unit.name}: ${session.title}. Status: ${station.statusText}.${moreWords}${markerWords(items)}`}
         title={`${session.title}: ${station.statusText}`}
         onClick={() => onSelect({ kind: 'desk', unit: unit.id, session: key })}
       >
         <span className="station__pins" aria-hidden="true">
           <Markers items={items} except={station.pose === 'waiting' ? ['waiting-session'] : []} />
         </span>
+        {more}
         {labels}
       </button>
     );

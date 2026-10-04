@@ -3,14 +3,14 @@ import type {
   AttentionItem,
   AttentionKind,
   DepartmentActivity,
+  HqLiveSession,
   HqOverview,
   HqUnit,
   IssueLevel,
+  LiveSubagent,
   OrgDepartment,
-  OrgPlacement,
   OrgSnapshot,
   SessionStatus,
-  SessionSummary,
   Subsidiary,
 } from '@pebble/core';
 import { hashOf, type Pose, type SeatedPose } from '../components/sprites.tsx';
@@ -25,7 +25,13 @@ import { hashOf, type Pose, type SeatedPose } from '../components/sprites.tsx';
  * interpolated or invented. A desk with nobody at it is drawn empty.
  */
 
-export type PlacedSession = SessionSummary & { placement: OrgPlacement };
+/** A live session on the map, with the sub-agent runs it has going right now. */
+export type PlacedSession = HqLiveSession;
+
+/** Live sub-agents of a session, defensive against a server that predates the field. */
+export function liveSubsOf(session: PlacedSession): LiveSubagent[] {
+  return (session.liveSubagents ?? []).filter((sub) => sub.status !== 'done');
+}
 
 export const LEVEL_RANK: Record<IssueLevel, number> = { error: 2, warn: 1, info: 0 };
 const TINTS = 12;
@@ -91,7 +97,42 @@ export interface StationModel {
   look: number;
   /** The character at this desk, when the data says someone is there. */
   occupant: string | null;
+  /** The parent's caption's sub-agent count ("3"), kept apart so it never truncates. */
+  subsCaption: string | null;
+  /** Every live sub-agent drawn at this desk, oldest first; the first few stand round it. */
+  subagents: StationSub[];
+  /** The sub-agents drawn as small characters beside the chair, at most MAX_KIDS. */
+  kids: KidModel[];
+  /** Sub-agents running here that there is no room to draw. */
+  kidsHidden: number;
 }
+
+/** A live sub-agent and the session that started it. */
+export interface StationSub {
+  sub: LiveSubagent;
+  parent: PlacedSession;
+}
+
+/** A sub-agent drawn as a small character standing at its parent's desk. */
+export interface KidModel {
+  /** Stable occupant id, so the map can diff it like any other character. */
+  id: string;
+  sub: LiveSubagent;
+  /** Which spot beside the chair, 0..MAX_KIDS-1. Stable across reads. */
+  slot: number;
+  pose: SeatedPose;
+  look: number;
+}
+
+/** Spots beside a chair for sub-agents; more than this become a "+N" chip. */
+export const MAX_KIDS = 4;
+
+export const SUB_WORDS: Record<SessionStatus, string> = {
+  active: 'working',
+  waiting: 'needs you',
+  idle: 'idle',
+  done: 'done',
+};
 
 export interface UnitModel {
   id: string;
@@ -149,32 +190,129 @@ export function isSeated(pose: Pose): pose is SeatedPose {
 }
 
 /*
- * Hot desk seats are remembered for the life of the page, so a session keeps
- * its chair across reloads instead of shuffling whenever someone else leaves.
+ * Hot desk seats, and the spots beside a chair where sub-agents stand, are
+ * remembered for the life of the page, so a session keeps its chair (and a
+ * helper its spot) across reloads instead of shuffling whenever someone else
+ * leaves.
  */
 const seatMemory = new Map<string, Map<string, number>>();
+const kidMemory = new Map<string, Map<string, number>>();
 
-function assignSeats(unitId: string, keys: string[]): Map<string, number> {
-  const previous = seatMemory.get(unitId) ?? new Map<string, number>();
+/**
+ * Stable slots for `keys`. A key keeps its previous slot; with a `cap`, a key
+ * remembered beyond the cap (not drawn) moves into a lower free slot when one
+ * opens up.
+ */
+function assignSlots(memory: Map<string, Map<string, number>>, scope: string, keys: string[], cap = Infinity): Map<string, number> {
+  const previous = memory.get(scope) ?? new Map<string, number>();
   const next = new Map<string, number>();
   const live = new Set(keys);
-  // A seat freed in this read is not handed to a newcomer in the same read:
+  // A slot freed in this read is not handed to a newcomer in the same read:
   // the leaver is still walking out of it.
-  const released = new Set([...previous].filter(([key]) => !live.has(key)).map(([, seat]) => seat));
+  const released = new Set([...previous].filter(([key]) => !live.has(key)).map(([, slot]) => slot));
   for (const key of keys) {
-    const seat = previous.get(key);
-    if (seat !== undefined) next.set(key, seat);
+    const slot = previous.get(key);
+    if (slot !== undefined && slot < cap) next.set(key, slot);
   }
   const taken = new Set([...next.values(), ...released]);
   for (const key of keys) {
     if (next.has(key)) continue;
-    let seat = 0;
-    while (taken.has(seat)) seat += 1;
-    next.set(key, seat);
-    taken.add(seat);
+    let slot = 0;
+    while (taken.has(slot)) slot += 1;
+    // Still beyond the cap: keep its old place in the overflow queue if it had one.
+    const old = previous.get(key);
+    if (slot >= cap && old !== undefined && !taken.has(old)) slot = old;
+    next.set(key, slot);
+    taken.add(slot);
   }
-  seatMemory.set(unitId, next);
+  if (next.size === 0) memory.delete(scope);
+  else memory.set(scope, next);
   return next;
+}
+
+function assignSeats(unitId: string, keys: string[]): Map<string, number> {
+  return assignSlots(seatMemory, unitId, keys);
+}
+
+/** Pose for a sub-agent standing at the desk. `done` never reaches here; it is filtered out. */
+function kidPose(status: SessionStatus): SeatedPose {
+  return status === 'waiting' ? 'waiting' : status === 'idle' ? 'idle' : 'active';
+}
+
+/** "2 working, 1 needs you": sub-agent statuses in words, busiest first. */
+export function subBreakdown(subs: LiveSubagent[]): string {
+  const order: SessionStatus[] = ['active', 'waiting', 'idle'];
+  return order
+    .map((status) => [status, subs.filter((sub) => sub.status === status).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([status, n]) => `${n} ${SUB_WORDS[status]}`)
+    .join(', ');
+}
+
+interface DeskPeople {
+  pose: Pose;
+  statusText: string;
+  caption: string;
+  subsCaption: string | null;
+  subagents: StationSub[];
+  kids: KidModel[];
+  kidsHidden: number;
+}
+
+/**
+ * The sub-agents at one desk, and what that does to the desk's own words.
+ *
+ * A sub-agent whose type is the agent of a department desk in the same room
+ * already lights that desk up as a grown-up character (core counts it as the
+ * department's activity), so drawing it again here would count it twice.
+ *
+ * A parent whose own run is done but whose sub-agents are still going stays
+ * seated, quiet: it has not left, and it is not working either.
+ */
+function deskPeople(
+  unitId: string,
+  stationKey: string,
+  base: { pose: Pose; statusText: string; caption: string },
+  parents: PlacedSession[],
+  deptAgents: Set<string>,
+  draw: boolean,
+): DeskPeople {
+  const subagents: StationSub[] = parents
+    .flatMap((parent) => liveSubsOf(parent).map((sub) => ({ sub, parent })))
+    .filter(({ sub }) => sub.agentType === null || !deptAgents.has(sub.agentType))
+    .sort((a, b) => Date.parse(a.sub.startedAt) - Date.parse(b.sub.startedAt));
+  if (!draw || subagents.length === 0) {
+    return { ...base, subsCaption: null, subagents: draw ? [] : subagents, kids: [], kidsHidden: 0 };
+  }
+
+  const idOf = (entry: StationSub): string => `${unitId}/k/${sessionKey(entry.parent)}/${entry.sub.id}`;
+  const slots = assignSlots(kidMemory, `${unitId}|${stationKey}`, subagents.map(idOf), MAX_KIDS);
+  const kids: KidModel[] = [];
+  let kidsHidden = 0;
+  for (const entry of subagents) {
+    const id = idOf(entry);
+    const slot = slots.get(id) ?? MAX_KIDS;
+    if (slot >= MAX_KIDS) {
+      kidsHidden += 1;
+      continue;
+    }
+    kids.push({ id, sub: entry.sub, slot, pose: kidPose(entry.sub.status), look: hashOf(id) });
+  }
+
+  const n = subagents.length;
+  const quiet = base.pose === 'empty';
+  const pose: Pose = quiet ? 'idle' : base.pose;
+  const word = quiet ? 'quiet' : base.caption;
+  const lead = quiet ? 'quiet, its sub-agents are still running' : base.statusText;
+  return {
+    pose,
+    statusText: `${lead}; ${plural(n, 'sub-agent')} running: ${subBreakdown(subagents.map((e) => e.sub))}`,
+    caption: word,
+    subsCaption: String(n),
+    subagents,
+    kids,
+    kidsHidden,
+  };
 }
 
 export function buildFloor(data: HqOverview, org: OrgSnapshot): UnitModel[] {
@@ -239,22 +377,32 @@ export function buildFloor(data: HqOverview, org: OrgSnapshot): UnitModel[] {
 }
 
 function room(base: Omit<UnitModel, 'stations'>): UnitModel {
+  const deptAgents = new Set(base.depts.map((dept) => dept.agent));
+  const live = base.unit?.live ?? [];
+
   const stations: StationModel[] = base.depts.map((dept, index) => {
+    const key = `d:${dept.id}`;
     // An archived room is closed: its desks are under dust sheets, whatever the last run said.
-    const pose: Pose = base.archived ? 'vacant' : dept.pose;
+    const closed = { pose: 'vacant' as Pose, statusText: 'closed: subsidiary archived', caption: 'closed' };
+    const people = deskPeople(
+      base.id,
+      key,
+      base.archived ? closed : { pose: dept.pose, statusText: dept.statusText, caption: dept.caption },
+      live.filter((session) => session.placement.department === dept.id),
+      deptAgents,
+      !base.archived,
+    );
     return {
-      key: `d:${dept.id}`,
+      key,
       index,
       kind: 'dept',
       dept,
       session: null,
-      pose,
-      statusText: base.archived ? 'closed: subsidiary archived' : dept.statusText,
-      caption: base.archived ? 'closed' : dept.caption,
+      ...people,
       plate: dept.name,
       tint: dept.tint,
       look: hashOf(`${base.id}/${dept.id}`),
-      occupant: isSeated(pose) ? `${base.id}/d/${dept.id}` : null,
+      occupant: isSeated(people.pose) ? `${base.id}/d/${dept.id}` : null,
     };
   });
 
@@ -266,20 +414,45 @@ function room(base: Omit<UnitModel, 'stations'>): UnitModel {
   for (let seat = 0; seat < hotCount; seat += 1) {
     const session = bySeat.get(seat) ?? null;
     const key = session ? sessionKey(session) : null;
-    const { pose, text } = session ? DESK_POSE[session.status] : { pose: 'empty' as Pose, text: 'free' };
+    const stationKey = `h:${seat}`;
+    if (!session || !key) {
+      stations.push({
+        key: stationKey,
+        index: stations.length,
+        kind: 'hot',
+        dept: null,
+        session: null,
+        pose: 'empty',
+        statusText: 'free hot desk',
+        caption: 'free',
+        subsCaption: null,
+        subagents: [],
+        kids: [],
+        kidsHidden: 0,
+        plate: 'hot desk',
+        tint: 'worker',
+        look: hashOf(`${base.id}/seat/${seat}`),
+        occupant: null,
+      });
+      continue;
+    }
+    const { pose, text } = DESK_POSE[session.status];
+    let people = deskPeople(base.id, stationKey, { pose, statusText: text, caption: text }, [session], deptAgents, true);
+    if (session.status === 'done' && people.subagents.length === 0 && liveSubsOf(session).length > 0) {
+      // Every one of its sub-agents is drawn as a grown-up at a department desk.
+      people = { ...people, statusText: 'done; its sub-agents are still running at department desks' };
+    }
     stations.push({
-      key: `h:${seat}`,
+      key: stationKey,
       index: stations.length,
       kind: 'hot',
       dept: null,
       session,
-      pose,
-      statusText: session ? text : 'free hot desk',
-      caption: text,
+      ...people,
       plate: 'hot desk',
       tint: 'worker',
-      look: hashOf(key ?? `${base.id}/seat/${seat}`),
-      occupant: session && key && isSeated(pose) ? `${base.id}/s/${key}` : null,
+      look: hashOf(key),
+      occupant: isSeated(people.pose) ? `${base.id}/s/${key}` : null,
     });
   }
   return { ...base, stations };

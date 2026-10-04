@@ -16,6 +16,7 @@ import {
   isArchived,
   isPending,
   isTime,
+  liveSubsOf,
   locate,
   pinItems,
   plural,
@@ -26,6 +27,8 @@ import {
   type Pins,
   type PlacedSession,
   type Selection,
+  type StationModel,
+  type StationSub,
   type UnitModel,
 } from './hqModel.ts';
 
@@ -269,13 +272,15 @@ function Inspector(props: {
     if (!dept) return null;
     title = dept.name;
     kicker = `${unit.name} · workstation`;
-    body = <DeptInspector unit={unit} dept={dept} items={props.pins.get(`r:${unit.id}:${dept.id}`)} org={props.org} now={props.now} />;
+    const station = unit.stations.find((s) => s.key === `d:${dept.id}`) ?? null;
+    body = <DeptInspector unit={unit} dept={dept} station={station} items={props.pins.get(`r:${unit.id}:${dept.id}`)} org={props.org} now={props.now} />;
   } else if (selection.kind === 'desk') {
     const session = unit.desks.find((s) => sessionKey(s) === selection.session);
     if (!session) return null;
     title = session.title;
     kicker = `${unit.name} · hot desk`;
-    body = <DeskInspector session={session} items={props.pins.get(`d:${unit.id}:${selection.session}`)} now={props.now} />;
+    const station = unit.stations.find((s) => s.session !== null && sessionKey(s.session) === selection.session) ?? null;
+    body = <DeskInspector unit={unit} session={session} station={station} items={props.pins.get(`d:${unit.id}:${selection.session}`)} now={props.now} />;
   } else {
     body = <UnitInspector unit={unit} data={props.data} org={props.org} items={props.pins.get(`u:${unit.id}`)} now={props.now} />;
   }
@@ -347,11 +352,16 @@ function kpiFill(scorecard: OrgDepartment['scorecard']): { filled: number; total
 function DeptInspector(props: {
   unit: UnitModel;
   dept: DeptModel;
+  station: StationModel | null;
   items: AttentionItem[] | undefined;
   org: OrgSnapshot;
   now: number;
 }): ReactNode {
   const { unit, dept: room, org, now } = props;
+  const subs: StationSub[] = (unit.unit?.live ?? [])
+    .filter((session) => session.placement.department === room.id)
+    .flatMap((parent) => liveSubsOf(parent).map((sub) => ({ sub, parent })))
+    .sort((a, b) => Date.parse(a.sub.startedAt) - Date.parse(b.sub.startedAt));
   const activity = room.activity;
   const fill = kpiFill(room.org?.scorecard ?? null);
   const charter = unit.subsidiary?.charter ?? null;
@@ -359,7 +369,7 @@ function DeptInspector(props: {
   return (
     <>
       <div className="ins-portrait">
-        <StationPortrait pose={room.pose} tint={room.tint} look={hashOf(`${unit.id}/${room.id}`)} className="ins-portrait__scene" />
+        <StationPortrait pose={props.station?.pose ?? room.pose} tint={room.tint} look={hashOf(`${unit.id}/${room.id}`)} className="ins-portrait__scene" />
         <dl className="kv">
           <dt>agent</dt>
           <dd>
@@ -374,7 +384,12 @@ function DeptInspector(props: {
             )}
           </dd>
           <dt>status</dt>
-          <dd>{activity?.status ? <StatusDot status={activity.status} /> : <span className="muted">{room.statusText}</span>}</dd>
+          <dd>
+            {activity?.status ? <StatusDot status={activity.status} /> : <span className="muted">{room.statusText}</span>}
+            {activity?.status !== 'active' && activity?.status !== 'waiting' && activity?.status !== 'idle' && subs.length > 0 && (
+              <span className="faint small"> · quiet, its sub-agents are still running</span>
+            )}
+          </dd>
           <dt>this week</dt>
           <dd>{activity && activity.runs7d > 0 ? plural(activity.runs7d, 'run') : <span className="faint">no runs</span>}</dd>
           <dt>last run</dt>
@@ -406,6 +421,8 @@ function DeptInspector(props: {
           </p>
         )}
       </Block>
+
+      <SubagentList unit={unit} subs={subs} now={now} showParent empty={`None. When a ${room.agent} run starts a sub-agent, it stands at this desk while it runs.`} />
 
       <AttentionList items={props.items} root={org.root} now={now} />
 
@@ -451,17 +468,21 @@ function DeptInspector(props: {
   );
 }
 
-function DeskInspector(props: { session: PlacedSession; items: AttentionItem[] | undefined; now: number }): ReactNode {
-  const { session, now } = props;
+function DeskInspector(props: { unit: UnitModel; session: PlacedSession; station: StationModel | null; items: AttentionItem[] | undefined; now: number }): ReactNode {
+  const { unit, session, now } = props;
   const model = session.models[session.models.length - 1] ?? null;
+  const subs: StationSub[] = liveSubsOf(session)
+    .map((sub) => ({ sub, parent: session }))
+    .sort((a, b) => Date.parse(a.sub.startedAt) - Date.parse(b.sub.startedAt));
   return (
     <>
       <div className="ins-portrait">
-        <StationPortrait pose={DESK_POSE[session.status].pose} tint="worker" look={hashOf(sessionKey(session))} className="ins-portrait__scene" />
+        <StationPortrait pose={props.station?.pose ?? DESK_POSE[session.status].pose} tint="worker" look={hashOf(sessionKey(session))} className="ins-portrait__scene" />
         <dl className="kv">
           <dt>status</dt>
           <dd>
             <StatusDot status={session.status} />
+            {session.status === 'done' && subs.length > 0 && <span className="faint small"> · quiet, its sub-agents are still running</span>}
           </dd>
           <dt>running</dt>
           <dd>{duration(now - Date.parse(session.startedAt))}</dd>
@@ -495,11 +516,71 @@ function DeskInspector(props: { session: PlacedSession; items: AttentionItem[] |
           </>
         )}
       </dl>
+      <SubagentList unit={unit} subs={subs} now={now} empty="None. When this session starts a sub-agent, it stands at this desk while it runs." />
       <AttentionList items={props.items} root="" now={now} />
       <p className="small">
         <a href={sessionHref(session)}>Open the session →</a>
       </p>
     </>
+  );
+}
+
+const SUBS_SHOWN = 6;
+
+/**
+ * Sub-agents running now, each with its status in words, type, title and
+ * timing. A sub-agent whose type is a department's agent is drawn as a
+ * grown-up at that department's desk rather than beside this one, and the
+ * list says so instead of leaving the map and the words to disagree.
+ */
+function SubagentList(props: { unit: UnitModel; subs: StationSub[]; now: number; showParent?: boolean; empty: string }): ReactNode {
+  const { unit, subs, now } = props;
+  const [all, setAll] = useState(false);
+  const shown = all ? subs : subs.slice(0, SUBS_SHOWN);
+  return (
+    <Block label={`Sub-agents running now · ${subs.length}`}>
+      {subs.length === 0 ? (
+        <p className="faint small">{props.empty}</p>
+      ) : (
+        <>
+          <ul className="ins-list">
+            {shown.map(({ sub, parent }) => {
+              const elsewhere = sub.agentType === null ? undefined : unit.depts.find((d) => d.agent === sub.agentType);
+              return (
+                <li key={`${sessionKey(parent)}/${sub.id}`} className="ins-sub">
+                  <StatusDot status={sub.status} />
+                  <span className="ins-sub__body">
+                    <span className="ins-sub__title">
+                      {sub.agentType && <span className="mono small">{sub.agentType}</span>} <span className="hq-text">{sub.title}</span>
+                    </span>
+                    <span className="ins-meta small">
+                      <span title={sub.startedAt}>running {duration(now - Date.parse(sub.startedAt))}</span>
+                      <span title={sub.lastActivityAt}>last {relativeTime(sub.lastActivityAt, now)}</span>
+                      {sub.errorCount > 0 && <span className="ins-overdue">{plural(sub.errorCount, 'error')}</span>}
+                      {elsewhere && <span>drawn at the {elsewhere.name} desk</span>}
+                      {props.showParent && (
+                        <a href={sessionHref(parent)} title={parent.title}>
+                          from {parent.title} →
+                        </a>
+                      )}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {subs.length > SUBS_SHOWN && (
+            <p>
+              <button type="button" className="btn" onClick={() => setAll((v) => !v)}>
+                {all ? 'show fewer' : `show ${subs.length - SUBS_SHOWN} more`}
+              </button>
+            </p>
+          )}
+          {/* The desk inspector already says this beside the session's cost. */}
+          {props.showParent && <p className="faint small">A sub-agent's cost is counted separately from its parent session's.</p>}
+        </>
+      )}
+    </Block>
   );
 }
 
@@ -666,6 +747,7 @@ function UnitInspector(props: {
                 <StatusDot status={session.status} />
                 <a href={sessionHref(session)} className="truncate" title={session.title}>
                   {session.title}
+                  {liveSubsOf(session).length > 0 && <span className="faint small"> · {plural(liveSubsOf(session).length, 'sub-agent')} running</span>}
                 </a>
                 <CostFigure cost={session.cost} />
               </li>

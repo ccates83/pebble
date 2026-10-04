@@ -375,10 +375,33 @@ button.station[aria-pressed='true']::before {
 }
 
 .station__plate,
-.station__status {
+.station__status,
+.station__word {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.station__word {
+  min-width: 0;
+}
+
+/* The sub-agent count ("· 3") never truncates; its words are in the label. */
+.station__subs {
+  flex: none;
+}
+
+/* Sub-agents with no spot left beside the chair: a count, in words in the label. */
+.station__more {
+  position: absolute;
+  /* On the desk top's left corner, clear of the spots beside the chair. */
+  left: calc(1 * var(--px));
+  top: calc(16 * var(--px));
+  padding: 0 2px;
+  background: var(--c-paper);
+  color: var(--c-ink);
+  box-shadow: 0 0 0 1px var(--px-ink), 1px 1px 0 0 var(--px-shade);
+  font: 400 var(--fs-pixel) / 1 var(--font-pixel);
 }
 
 .station__plate {
@@ -469,6 +492,20 @@ button.station[aria-pressed='true']::before {
   translate: calc((var(--x) - 12) * var(--px)) calc((var(--y) - 36) * var(--px));
 }
 
+.walker--kid {
+  width: calc(8 * var(--px));
+  height: calc(13 * var(--px));
+  translate: calc((var(--x) - 4) * var(--px)) calc((var(--y) - 13) * var(--px));
+}
+
+/* A sub-agent at its desk: the 8 x 13 kid in a 16 x 21 viewport, with
+   headroom for its "!" or Zs; the feet stay on --x, --y. */
+.walker--kid.walker--seated {
+  width: calc(16 * var(--px));
+  height: calc(21 * var(--px));
+  translate: calc((var(--x) - 8) * var(--px)) calc((var(--y) - 21) * var(--px));
+}
+
 .walker > svg {
   display: block;
   width: 100%;
@@ -489,6 +526,15 @@ button.station[aria-pressed='true']::before {
 
 .spr-sheet--type {
   animation: px-sheet-2 0.46s steps(2) infinite;
+}
+
+/* Kids are 8 pixels wide, so their strips step by 8. */
+.spr-walk--kid .spr-sheet {
+  animation: px-sheet-kid 0.3s steps(2) infinite;
+}
+
+.spr-sheet--kid {
+  animation: px-sheet-kid 0.4s steps(2) infinite;
 }
 
 .spr-bubble {
@@ -629,6 +675,10 @@ button.station[aria-pressed='true']::before {
   to { transform: translateX(-24px); }
 }
 
+@keyframes px-sheet-kid {
+  to { transform: translateX(-16px); }
+}
+
 @keyframes px-blink {
   50% { opacity: 0; }
 }
@@ -678,6 +728,7 @@ button.station[aria-pressed='true']::before {
     transition: none;
   }
 
+  /* Grown-ups and kids alike: one Z, one still "!", the first typing frame. */
   .spr-z--2 {
     display: none;
   }
@@ -865,6 +916,23 @@ button.station[aria-pressed='true']::before {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--sp-2);
   align-items: baseline;
+}
+
+.ins-sub {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.ins-sub__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ins-sub__title {
+  overflow-wrap: anywhere;
 }
 
 .ins-pin {

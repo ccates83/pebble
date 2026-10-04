@@ -2,9 +2,11 @@ import type {
   AttentionItem,
   AttentionKind,
   DepartmentActivity,
+  HqLiveSession,
   HqOverview,
   HqUnit,
   IssueLevel,
+  LiveSubagent,
   OrgNote,
   OrgPlacement,
   OrgSnapshot,
@@ -150,14 +152,40 @@ function departmentActivity(
   });
 }
 
+/** A session's sub-agent runs that are still going, oldest first so the UI can seat them stably. */
+function liveSubagentsOf(s: Placed, runsByParent: Map<string, SubagentRun[]>): LiveSubagent[] {
+  return (runsByParent.get(key(s.adapter, s.id)) ?? [])
+    .filter((run) => LIVE.includes(run.status))
+    .sort((a, b) => dateMs(a.startedAt) - dateMs(b.startedAt) || a.id.localeCompare(b.id))
+    .map((run) => ({
+      id: run.id,
+      agentType: run.agentType,
+      title: run.title,
+      status: run.status,
+      startedAt: run.startedAt,
+      lastActivityAt: run.lastActivityAt,
+      errorCount: run.errorCount,
+    }));
+}
+
 function buildUnit(
   id: string,
   kind: HqUnit['kind'],
   name: string,
   sessions: Placed[],
   departments: DepartmentActivity[],
+  runsByParent: Map<string, SubagentRun[]>,
   since7d: number,
 ): HqUnit {
+  // A parent that went quiet while background sub-agents keep working is still
+  // on the floor. Its own status stays as measured; only its membership in
+  // `live` is widened. `sessions` is already newest first, so order holds.
+  const live: HqLiveSession[] = [];
+  for (const s of sessions) {
+    const liveSubagents = liveSubagentsOf(s, runsByParent);
+    if (LIVE.includes(s.status) || liveSubagents.length > 0) live.push({ ...s, liveSubagents });
+  }
+
   const week = sessions.filter((s) => dateMs(s.lastActivityAt) >= since7d);
   let usd = 0;
   let approximate = false;
@@ -171,7 +199,7 @@ function buildUnit(
     id,
     kind,
     name,
-    live: sessions.filter((s) => LIVE.includes(s.status)),
+    live,
     recent: sessions.slice(0, RECENT_CAP),
     departments,
     sessions7d: week.length,
@@ -244,12 +272,12 @@ export function buildHqOverview(store: PebbleStore, org: OrgSnapshot | null, now
   const byUnit = (scope: OrgPlacement['scope'], unit: string): Placed[] =>
     inOrg.filter((s) => s.placement.scope === scope && s.placement.unit === unit);
 
-  const units: HqUnit[] = [buildUnit('hq', 'hq', org.name ?? 'HQ', byUnit('hq', 'hq'), [], since7d)];
+  const units: HqUnit[] = [buildUnit('hq', 'hq', org.name ?? 'HQ', byUnit('hq', 'hq'), [], runsByParent, since7d)];
   for (const sub of org.subsidiaries) {
     const sessions = byUnit('subsidiary', sub.id);
-    units.push(buildUnit(sub.id, 'subsidiary', sub.name, sessions, departmentActivity(sub, sessions, runsByParent, since7d), since7d));
+    units.push(buildUnit(sub.id, 'subsidiary', sub.name, sessions, departmentActivity(sub, sessions, runsByParent, since7d), runsByParent, since7d));
   }
-  for (const tool of org.tooling) units.push(buildUnit(tool.id, 'tooling', tool.id, byUnit('tooling', tool.id), [], since7d));
+  for (const tool of org.tooling) units.push(buildUnit(tool.id, 'tooling', tool.id, byUnit('tooling', tool.id), [], runsByParent, since7d));
 
   // ---- attention ---------------------------------------------------------
 
